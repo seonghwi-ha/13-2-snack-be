@@ -30,16 +30,21 @@ function nullableUrlSchema(message: string) {
 
 // 업로드한 이미지는 우리 이미지 API 경로(`/api/images/...`)로 오고 외부 URL이 아니다.
 // 외부 이미지 주소도 아직 허용해야 해서 절대 URL과 내부 경로를 둘 다 받는다.
+// 문자열 후보가 둘이라 둘 다 실패하면 Zod가 "Invalid input"으로 뭉뚱그리므로
+// union 자체에도 메시지를 준다.
 function nullableImageUrlSchema(message: string) {
   return z
     .preprocess(
       (value) => (typeof value === 'string' ? value.trim() : value),
-      z.union([
-        z.literal(''),
-        z.null(),
-        z.string().regex(/^\/[^\s]*$/, { error: message }),
-        z.url({ error: message }),
-      ]),
+      z.union(
+        [
+          z.literal(''),
+          z.null(),
+          z.string().regex(/^\/[^\s]*$/, { error: message }),
+          z.url({ error: message }),
+        ],
+        { error: message },
+      ),
     )
     .transform((value) => (value === '' ? null : value));
 }
