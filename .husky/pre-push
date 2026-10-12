@@ -1,13 +1,48 @@
-# 개인 포크(seonghwi-ha)에서만 작업한다. 팀 저장소 등 다른 곳으로의 push는 막는다.
-# husky는 git과 같은 인자를 넘긴다: $1 원격 이름, $2 원격 주소
+# 개인 포크(seonghwi-ha)에서만 작업한다.
+# 1) 팀 저장소 등 다른 원격으로의 push를 막는다.
+# 2) 개발 도구 설정·지침 파일이나 개인 파일이 커밋에 들어 있으면 push를 막는다.
+# husky는 git과 같은 인자를 넘긴다: $1 원격 이름, $2 원격 주소, 표준 입력으로 push할 ref 목록
+remote_name="$1"
 remote_url="$2"
 
 case "$remote_url" in
-  *github.com/seonghwi-ha/* | *github.com:seonghwi-ha/*)
-    exit 0
+  *github.com/seonghwi-ha/* | *github.com:seonghwi-ha/*) ;;
+  *)
+    echo "push 차단: $remote_url 은(는) 개인 포크가 아닙니다." >&2
+    echo "seonghwi-ha 저장소로만 push할 수 있습니다." >&2
+    exit 1
     ;;
 esac
 
-echo "push 차단: $remote_url 은(는) 개인 포크가 아닙니다." >&2
-echo "seonghwi-ha 저장소로만 push할 수 있습니다." >&2
-exit 1
+# 올리면 안 되는 파일 경로 (.gitignore와 같은 목록, git add -f로 넣은 경우까지 막는다)
+# - 개발 도구 설정·지침: CLAUDE.md, AGENTS.md 수정, .claude/ 등
+# - 개인 파일: private/ 폴더, 이름에 .private. 이 들어간 파일
+blocked='(^|/)(CLAUDE(\.local)?\.md|GEMINI\.md|AGENTS\.md|\.cursorrules|copilot-instructions\.md)$'
+blocked="$blocked"'|(^|/)\.(claude|cursor|codex|gemini|windsurf|agents|aider[^/]*)(/|$)'
+blocked="$blocked"'|(^|/)private/|\.private\.'
+
+zero=0000000000000000000000000000000000000000
+status=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # 브랜치 삭제는 올라가는 파일이 없다.
+  [ "$local_sha" = "$zero" ] && continue
+
+  # 새 브랜치면 원격에 아직 없는 커밋만, 기존 브랜치면 원격 이후 커밋만 본다.
+  if [ "$remote_sha" = "$zero" ]; then
+    files=$(git log --name-only --diff-filter=ACMR --format= "$local_sha" --not --remotes="$remote_name")
+  else
+    files=$(git log --name-only --diff-filter=ACMR --format= "$remote_sha..$local_sha" 2>/dev/null ||
+      git log --name-only --diff-filter=ACMR --format= "$local_sha" --not --remotes="$remote_name")
+  fi
+
+  found=$(printf '%s\n' "$files" | sort -u | grep -E "$blocked" || true)
+
+  if [ -n "$found" ]; then
+    echo "push 차단: 올리면 안 되는 파일이 커밋에 있습니다. ($local_ref)" >&2
+    printf '%s\n' "$found" | sed 's/^/  - /' >&2
+    status=1
+  fi
+done
+
+exit $status
