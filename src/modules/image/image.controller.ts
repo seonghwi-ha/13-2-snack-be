@@ -13,7 +13,7 @@ import * as imageService from './image.service';
 - 업로드 응답의 imageKey는 백엔드용(교체·삭제 때 S3 파일 지목), imageUrl은 프론트가 그대로 쓴다.
 */
 
-export function createImage(req: Request, res: Response): void {
+export async function createImage(req: Request, res: Response): Promise<void> {
   // multer-s3가 채워 넣는 key까지 아는 타입으로 좁힌다.
   const file = req.file as Express.MulterS3.File | undefined;
 
@@ -21,6 +21,8 @@ export function createImage(req: Request, res: Response): void {
   if (!file) {
     throw new BadRequestError('image 필드에 이미지 파일을 담아 보내주세요.');
   }
+
+  await imageService.recordUploadedImage(file.key, req.auth!);
 
   res.status(201).json({
     success: true,
@@ -51,7 +53,7 @@ export async function getImage(req: Request, res: Response): Promise<void> {
 export async function deleteImage(req: Request, res: Response): Promise<void> {
   const { key } = imageKeyParamsSchema.parse(req.params);
 
-  await imageService.deleteImageObject(key);
+  await imageService.deleteImage(key, req.auth!);
 
   res.status(200).json({
     success: true,

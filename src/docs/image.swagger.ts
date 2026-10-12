@@ -102,7 +102,9 @@
  *   delete:
  *     summary: 이미지 삭제
  *     description: |
- *       ADMIN, SUPER_ADMIN만 호출할 수 있습니다.
+ *       업로드한 본인 또는 같은 조직의 ADMIN, SUPER_ADMIN이 호출할 수 있습니다.
+ *       업로드 기록이 없는 예전 이미지는 ADMIN, SUPER_ADMIN만 지울 수 있습니다.
+ *       삭제하면 같은 조직에서 이 이미지를 쓰던 상품의 imageUrl도 null로 비웁니다.
  *       S3는 없는 key를 삭제해도 성공으로 응답하므로 이미 없는 이미지도 200입니다.
  *     tags: [Image]
  *     parameters:
@@ -134,4 +136,6 @@
  *         $ref: '#/components/responses/Unauthorized'
  *       403:
  *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
  */

@@ -1,7 +1,6 @@
 import { Router } from 'express';
 
-import { Role } from '../generated/prisma/client';
-import { authenticate, authorize } from '../middlewares/auth.middleware';
+import { authenticate } from '../middlewares/auth.middleware';
 import { uploadImageToS3 } from '../middlewares/upload.middleware';
 import * as imageController from '../modules/image/image.controller';
 
@@ -14,12 +13,7 @@ router.post('/', authenticate, uploadImageToS3, imageController.createImage);
 // <img>·next/image 요청은 fetchClient를 거치지 않아 토큰을 자동으로 재발급받지 못한다.
 // key가 UUID라 주소를 모르면 열 수 없고, 버킷은 계속 프라이빗이다.
 router.get('/*key', imageController.getImage);
-// TODO: imageKey가 DB에 추가되면 상품 등록자 본인도 삭제할 수 있게 하고 DB 기록도 정리한다.
-router.delete(
-  '/*key',
-  authenticate,
-  authorize(Role.ADMIN, Role.SUPER_ADMIN),
-  imageController.deleteImage,
-);
+// 업로드한 본인 또는 같은 조직의 관리자 이상이 지운다. 권한 판단은 서비스에서 한다.
+router.delete('/*key', authenticate, imageController.deleteImage);
 
 export default router;
