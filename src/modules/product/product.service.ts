@@ -64,8 +64,8 @@ type DeleteProductParams = {
   requester: Requester;
 };
 
-// 없는 카테고리 id는 Prisma가 P2003을 던지는데 errorHandler가 처리하지 않아 500이 된다.
-// 사용자 입력 실수이므로 미리 확인해 400으로 내보낸다.
+// 없는 카테고리 id는 Prisma P2003이 되어 errorHandler가 일반 메시지의 400으로 응답한다.
+// 어떤 값이 잘못됐는지 알려주려고 미리 확인한다.
 async function assertCategoryExists(categoryId: number): Promise<void> {
   const category = await productRepository.findCategoryById(categoryId);
 
