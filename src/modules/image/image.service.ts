@@ -6,6 +6,7 @@ import {
   NoSuchKey,
   S3ServiceException,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { findMissingS3Env, getS3Bucket, getS3Client } from '../../config/s3';
 import { Role } from '../../generated/prisma/client';
@@ -78,6 +79,58 @@ export async function getImageObject(imageKey: string): Promise<ImageObject> {
 
     throw error;
   }
+}
+
+/*
+@ 이미지 제공 방식 (IMAGE_DELIVERY_MODE)
+- proxy(기본): 서버가 S3에서 받아 그대로 흘려보낸다. 설정이 간단하지만 이미지 트래픽이 모두 EC2를 지난다.
+- redirect: 짧게 유효한 주소로 302 리다이렉트해 브라우저가 이미지를 직접 받게 한다.
+  IMAGE_CDN_BASE_URL이 있으면 CloudFront 주소로, 없으면 S3 presigned URL로 보낸다.
+- DB의 imageUrl은 항상 우리 API 경로(/images/<key>)라서, 방식을 바꿔도 저장된 데이터는 그대로다.
+*/
+
+const PRESIGNED_URL_EXPIRES_SECONDS = 60 * 60;
+// 만료 직전 주소를 브라우저가 캐시에서 꺼내 쓰지 않도록 리다이렉트 응답은 5분 먼저 만료시킨다.
+const PRESIGNED_REDIRECT_MAX_AGE_SECONDS = PRESIGNED_URL_EXPIRES_SECONDS - 300;
+// CDN 주소는 바뀌지 않으므로 리다이렉트 응답도 길게 캐시한다.
+const CDN_REDIRECT_MAX_AGE_SECONDS = 60 * 60 * 24;
+
+export type ImageRedirect = {
+  url: string;
+  cacheControl: string;
+};
+
+export function isImageRedirectMode(): boolean {
+  return process.env.IMAGE_DELIVERY_MODE?.trim() === 'redirect';
+}
+
+export async function getImageRedirect(
+  imageKey: string,
+): Promise<ImageRedirect> {
+  const cdnBaseUrl = process.env.IMAGE_CDN_BASE_URL?.trim().replace(/\/+$/, '');
+
+  if (cdnBaseUrl) {
+    return {
+      url: `${cdnBaseUrl}/${imageKey}`,
+      cacheControl: `public, max-age=${CDN_REDIRECT_MAX_AGE_SECONDS}`,
+    };
+  }
+
+  assertS3Env();
+
+  // 서명은 서버 안에서 계산만 하므로 S3에 요청을 보내지 않는다.
+  // 그래서 없는 key도 주소는 만들어지고, 404 대신 S3가 직접 에러를 준다.
+  const url = await getSignedUrl(
+    getS3Client(),
+    new GetObjectCommand({ Bucket: getS3Bucket(), Key: imageKey }),
+    { expiresIn: PRESIGNED_URL_EXPIRES_SECONDS },
+  );
+
+  // presigned URL은 요청마다 달라 공용 캐시(CDN)에 담기면 안 된다.
+  return {
+    url,
+    cacheControl: `private, max-age=${PRESIGNED_REDIRECT_MAX_AGE_SECONDS}`,
+  };
 }
 
 // S3의 DeleteObject는 없는 key여도 성공으로 응답한다.

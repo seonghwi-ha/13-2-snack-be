@@ -9,7 +9,14 @@ import * as imageService from './image.service';
 // DB와 S3 없이 서비스 규칙만 확인한다.
 jest.mock('./image.repository');
 jest.mock('../../config/s3', () => {
-  const client = { send: jest.fn() };
+  // 서명 URL은 실제 클라이언트 설정으로 계산하므로 가짜 자격 증명을 넣은 진짜 S3Client를 쓴다.
+  // send만 가로채서 S3로 요청이 나가지 않게 한다.
+  const { S3Client } = jest.requireActual('@aws-sdk/client-s3');
+  const client = new S3Client({
+    region: 'ap-northeast-2',
+    credentials: { accessKeyId: 'AKIATEST', secretAccessKey: 'test-secret' },
+  });
+  client.send = jest.fn();
 
   return {
     getS3Client: () => client,
@@ -202,5 +209,48 @@ describe('고아 이미지 정리 (cleanupOrphanImages)', () => {
     expect(repository.deleteManyByKeys).toHaveBeenCalledWith([
       'public/products/ok.png',
     ]);
+  });
+});
+
+describe('리다이렉트 방식 이미지 제공 (getImageRedirect)', () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  test('IMAGE_DELIVERY_MODE가 redirect일 때만 리다이렉트 방식이다', () => {
+    delete process.env.IMAGE_DELIVERY_MODE;
+    expect(imageService.isImageRedirectMode()).toBe(false);
+
+    process.env.IMAGE_DELIVERY_MODE = 'redirect';
+    expect(imageService.isImageRedirectMode()).toBe(true);
+  });
+
+  test('CDN 주소가 없으면 1시간짜리 S3 presigned URL을 만든다', async () => {
+    delete process.env.IMAGE_CDN_BASE_URL;
+
+    const redirect = await imageService.getImageRedirect(KEY);
+    const url = new URL(redirect.url);
+
+    expect(url.hostname).toBe('test-bucket.s3.ap-northeast-2.amazonaws.com');
+    expect(url.pathname).toBe(`/${KEY}`);
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('3600');
+    expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/);
+    // 요청마다 달라지는 주소라 공용 캐시에 담지 않고, 만료 전에 다시 받게 한다.
+    expect(redirect.cacheControl).toBe('private, max-age=3300');
+    // 서명은 계산만 하고 S3로 요청을 보내지 않는다.
+    expect(s3Send).not.toHaveBeenCalled();
+  });
+
+  test('CDN 주소가 있으면 CloudFront 주소로 보낸다 (끝 슬래시 정리)', async () => {
+    process.env.IMAGE_CDN_BASE_URL = 'https://cdn.example.com/';
+
+    const redirect = await imageService.getImageRedirect(KEY);
+
+    expect(redirect).toEqual({
+      url: `https://cdn.example.com/${KEY}`,
+      cacheControl: 'public, max-age=86400',
+    });
   });
 });

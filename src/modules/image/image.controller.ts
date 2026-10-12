@@ -35,6 +35,16 @@ export async function createImage(req: Request, res: Response): Promise<void> {
 
 export async function getImage(req: Request, res: Response): Promise<void> {
   const { key } = imageKeyParamsSchema.parse(req.params);
+
+  // 리다이렉트 방식이면 서버가 이미지를 받지 않고 주소만 알려준다. (image.service.ts 참고)
+  if (imageService.isImageRedirectMode()) {
+    const redirect = await imageService.getImageRedirect(key);
+
+    res.setHeader('Cache-Control', redirect.cacheControl);
+    res.redirect(302, redirect.url);
+    return;
+  }
+
   const image = await imageService.getImageObject(key);
 
   res.setHeader('Content-Type', image.contentType);
