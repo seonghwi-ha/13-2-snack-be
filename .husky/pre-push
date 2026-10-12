@@ -1,0 +1,13 @@
+# 개인 포크(seonghwi-ha)에서만 작업한다. 팀 저장소 등 다른 곳으로의 push는 막는다.
+# husky는 git과 같은 인자를 넘긴다: $1 원격 이름, $2 원격 주소
+remote_url="$2"
+
+case "$remote_url" in
+  *github.com/seonghwi-ha/* | *github.com:seonghwi-ha/*)
+    exit 0
+    ;;
+esac
+
+echo "push 차단: $remote_url 은(는) 개인 포크가 아닙니다." >&2
+echo "seonghwi-ha 저장소로만 push할 수 있습니다." >&2
+exit 1
