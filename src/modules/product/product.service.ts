@@ -10,9 +10,14 @@ import {
 } from './product.cache';
 import { decodeProductCursor, encodeProductCursor } from './product.cursor';
 import * as productRepository from './product.repository';
-import type { ProductDetail, ProductListItem } from './product.repository';
+import type {
+  ProductDetail,
+  ProductHistoryItem,
+  ProductListItem,
+} from './product.repository';
 import type {
   CreateProductInput,
+  ProductHistoryQuery,
   SearchProductsInput,
   UpdateProductInput,
 } from './product.schema';
@@ -260,7 +265,11 @@ export async function updateProduct({
     await assertCategoryExists(data.categoryId);
   }
 
-  const product = await productRepository.update(productId, data);
+  const product = await productRepository.update(
+    productId,
+    data,
+    requester.userId,
+  );
   await invalidateProductListCache(requester.organizationId);
 
   return withOwnership(product, requester.userId);
@@ -272,8 +281,59 @@ export async function deleteProduct({
 }: DeleteProductParams): Promise<{ id: number }> {
   await assertCanModify(productId, requester);
 
-  const deleted = await productRepository.softDelete(productId);
+  const deleted = await productRepository.softDelete(
+    productId,
+    requester.userId,
+  );
   await invalidateProductListCache(requester.organizationId);
 
   return deleted;
+}
+
+type ProductHistoryResult = {
+  histories: ProductHistoryItem[];
+  hasNext: boolean;
+  /** 다음 요청의 cursor로 보낸다. 더 오래된 이력이 없으면 null. */
+  nextCursor: number | null;
+};
+
+/**
+ * 상품 변경 이력. 누가 언제 무엇을 바꿨는지 확인하는 감사용이라 같은 조직의 관리자 이상만 본다.
+ * 삭제된 상품도 이력은 볼 수 있다.
+ */
+export async function getProductHistory(
+  productId: number,
+  requester: Requester,
+  { cursor, limit }: ProductHistoryQuery,
+): Promise<ProductHistoryResult> {
+  const isAdmin =
+    requester.role === Role.ADMIN || requester.role === Role.SUPER_ADMIN;
+
+  if (!isAdmin) {
+    throw new ForbiddenError('상품 변경 이력은 관리자만 볼 수 있습니다.');
+  }
+
+  const product = await productRepository.existsInOrganization(
+    productId,
+    requester.organizationId,
+  );
+
+  if (!product) {
+    throw new NotFoundError('상품을 찾을 수 없습니다.');
+  }
+
+  const rows = await productRepository.findHistories({
+    productId,
+    beforeId: cursor,
+    take: limit + 1,
+  });
+
+  const hasNext = rows.length > limit;
+  const histories = rows.slice(0, limit);
+
+  return {
+    histories,
+    hasNext,
+    nextCursor: hasNext ? histories[histories.length - 1].id : null,
+  };
 }

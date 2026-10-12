@@ -336,7 +336,11 @@ describe('상품 수정·삭제 권한', () => {
       data: { price: 2000 },
     });
 
-    expect(repository.update).toHaveBeenCalledWith(1, { price: 2000 });
+    expect(repository.update).toHaveBeenCalledWith(
+      1,
+      { price: 2000 },
+      OWNER_ID,
+    );
     expect(invalidateProductListCache).toHaveBeenCalledWith(ORGANIZATION_ID);
   });
 
@@ -352,6 +356,7 @@ describe('상품 수정·삭제 권한', () => {
       });
 
       expect(result).toEqual({ id: 1 });
+      expect(repository.softDelete).toHaveBeenCalledWith(1, OTHER_USER_ID);
       expect(invalidateProductListCache).toHaveBeenCalledWith(ORGANIZATION_ID);
     },
   );
@@ -406,5 +411,78 @@ describe('상품 수정·삭제 권한', () => {
 
     await expect(promise).rejects.toBeInstanceOf(BadRequestError);
     expect(repository.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('상품 변경 이력 조회 (getProductHistory)', () => {
+  function history(id: number) {
+    return {
+      id,
+      action: 'UPDATE' as const,
+      changes: { price: { before: 1000, after: 1200 } },
+      createdAt: new Date('2026-10-01'),
+      actor: { id: OWNER_ID, name: '등록자' },
+    };
+  }
+
+  test('일반 회원은 볼 수 없다', async () => {
+    const promise = productService.getProductHistory(1, requester(OWNER_ID), {
+      limit: 20,
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(ForbiddenError);
+    expect(repository.findHistories).not.toHaveBeenCalled();
+  });
+
+  test('다른 조직의 상품이면 404를 던진다', async () => {
+    repository.existsInOrganization.mockResolvedValue(null);
+
+    const promise = productService.getProductHistory(
+      1,
+      requester(OTHER_USER_ID, Role.ADMIN),
+      { limit: 20 },
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(NotFoundError);
+    expect(repository.existsInOrganization).toHaveBeenCalledWith(
+      1,
+      ORGANIZATION_ID,
+    );
+  });
+
+  test('하나 더 읽어 다음 페이지가 있으면 마지막 이력 id를 커서로 준다', async () => {
+    repository.existsInOrganization.mockResolvedValue({ id: 1 });
+    repository.findHistories.mockResolvedValue([
+      history(9),
+      history(7),
+      history(3),
+    ]);
+
+    const result = await productService.getProductHistory(
+      1,
+      requester(OTHER_USER_ID, Role.ADMIN),
+      { cursor: 10, limit: 2 },
+    );
+
+    expect(repository.findHistories).toHaveBeenCalledWith({
+      productId: 1,
+      beforeId: 10,
+      take: 3,
+    });
+    expect(result.histories.map((item) => item.id)).toEqual([9, 7]);
+    expect(result).toMatchObject({ hasNext: true, nextCursor: 7 });
+  });
+
+  test('마지막 묶음이면 nextCursor가 null이다', async () => {
+    repository.existsInOrganization.mockResolvedValue({ id: 1 });
+    repository.findHistories.mockResolvedValue([history(1)]);
+
+    const result = await productService.getProductHistory(
+      1,
+      requester(OTHER_USER_ID, Role.SUPER_ADMIN),
+      { limit: 20 },
+    );
+
+    expect(result).toMatchObject({ hasNext: false, nextCursor: null });
   });
 });

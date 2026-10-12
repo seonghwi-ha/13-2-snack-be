@@ -1,6 +1,11 @@
 import { prisma } from '../../config/prisma';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, ProductHistoryAction } from '../../generated/prisma/client';
 import { type ProductCursor, buildCursorWhere } from './product.cursor';
+import {
+  TRACKED_PRODUCT_FIELDS,
+  diffProduct,
+  toCreateSnapshot,
+} from './product.history';
 import type { ProductSort } from './product.schema';
 
 type FindManyParams = {
@@ -200,33 +205,138 @@ export function findCategoryById(
   });
 }
 
+// 이력은 상품 변경과 같은 트랜잭션에서 남겨, 변경은 됐는데 이력이 없는 상태를 만들지 않는다.
 export async function create(data: CreateData): Promise<ProductDetail> {
-  const product = await prisma.product.create({
-    data,
-    select: productDetailArgs.select,
+  const product = await prisma.$transaction(async (tx) => {
+    const created = await tx.product.create({
+      data,
+      select: productDetailArgs.select,
+    });
+
+    await tx.productHistory.create({
+      data: {
+        productId: created.id,
+        organizationId: data.organizationId,
+        actorId: data.createdById,
+        action: ProductHistoryAction.CREATE,
+        changes: toCreateSnapshot(data),
+      },
+    });
+
+    return created;
   });
 
   return toDetail(product);
 }
+
+const trackedFieldsSelect = Object.fromEntries(
+  TRACKED_PRODUCT_FIELDS.map((field) => [field, true]),
+) as Record<(typeof TRACKED_PRODUCT_FIELDS)[number], true>;
 
 export async function update(
   productId: number,
   data: UpdateData,
+  actorId: number,
 ): Promise<ProductDetail> {
-  const product = await prisma.product.update({
-    where: { id: productId },
-    data,
-    select: productDetailArgs.select,
+  const product = await prisma.$transaction(async (tx) => {
+    const before = await tx.product.findUniqueOrThrow({
+      where: { id: productId },
+      select: { ...trackedFieldsSelect, organizationId: true },
+    });
+
+    const updated = await tx.product.update({
+      where: { id: productId },
+      data,
+      select: productDetailArgs.select,
+    });
+
+    const changes = diffProduct(before, data);
+
+    // 같은 값을 다시 저장한 요청은 이력을 남기지 않는다.
+    if (Object.keys(changes).length > 0) {
+      await tx.productHistory.create({
+        data: {
+          productId,
+          organizationId: before.organizationId,
+          actorId,
+          action: ProductHistoryAction.UPDATE,
+          changes,
+        },
+      });
+    }
+
+    return updated;
   });
 
   return toDetail(product);
 }
 
-export function softDelete(productId: number): Promise<{ id: number }> {
-  return prisma.product.update({
-    where: { id: productId },
-    data: { isDeleted: true },
+export function softDelete(
+  productId: number,
+  actorId: number,
+): Promise<{ id: number }> {
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.product.update({
+      where: { id: productId },
+      data: { isDeleted: true },
+      select: { id: true, organizationId: true },
+    });
+
+    await tx.productHistory.create({
+      data: {
+        productId,
+        organizationId: deleted.organizationId,
+        actorId,
+        action: ProductHistoryAction.DELETE,
+      },
+    });
+
+    return { id: deleted.id };
+  });
+}
+
+// 이력 조회는 삭제된 상품도 볼 수 있어야 해서 isDeleted를 보지 않는다.
+export function existsInOrganization(
+  productId: number,
+  organizationId: number,
+): Promise<{ id: number } | null> {
+  return prisma.product.findFirst({
+    where: { id: productId, organizationId },
     select: { id: true },
+  });
+}
+
+const productHistoryArgs = {
+  select: {
+    id: true,
+    action: true,
+    changes: true,
+    createdAt: true,
+    actor: { select: { id: true, name: true } },
+  },
+} satisfies Prisma.ProductHistoryDefaultArgs;
+
+export type ProductHistoryItem = Prisma.ProductHistoryGetPayload<
+  typeof productHistoryArgs
+>;
+
+type FindHistoriesParams = {
+  productId: number;
+  // 이 id보다 오래된 이력부터 읽는다. id가 커질수록 최신이다.
+  beforeId?: number;
+  take: number;
+};
+
+export function findHistories({
+  productId,
+  beforeId,
+  take,
+}: FindHistoriesParams): Promise<ProductHistoryItem[]> {
+  return prisma.productHistory.findMany({
+    where: { productId, ...(beforeId ? { id: { lt: beforeId } } : {}) },
+    select: productHistoryArgs.select,
+    orderBy: { id: 'desc' },
+    take,
   });
 }
 

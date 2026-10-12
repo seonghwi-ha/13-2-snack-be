@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 
 import {
   createProductSchema,
+  productHistoryQuerySchema,
   productIdParamsSchema,
   searchProductsSchema,
   updateProductSchema,
@@ -98,6 +99,21 @@ export async function deleteProduct(
     productId: id,
     requester: req.auth!,
   });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+}
+
+export async function getProductHistory(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { id } = productIdParamsSchema.parse(req.params);
+  const query = productHistoryQuerySchema.parse(req.query);
+
+  const result = await productService.getProductHistory(id, req.auth!, query);
 
   res.status(200).json({
     success: true,

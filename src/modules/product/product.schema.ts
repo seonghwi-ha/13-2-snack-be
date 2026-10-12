@@ -143,6 +143,23 @@ export const updateProductSchema = createProductSchema
     error: '수정할 내용이 없습니다.',
   });
 
+export const productHistoryQuerySchema = z.object({
+  // 응답의 nextCursor. 이 이력보다 오래된 이력부터 읽는다.
+  cursor: z.coerce
+    .number({ error: 'cursor는 숫자여야 합니다.' })
+    .int({ error: 'cursor는 정수여야 합니다.' })
+    .positive({ error: 'cursor는 1 이상이어야 합니다.' })
+    .optional(),
+
+  limit: z.coerce
+    .number({ error: 'limit은 숫자여야 합니다.' })
+    .int({ error: 'limit은 정수여야 합니다.' })
+    .min(1, { error: 'limit은 1 이상이어야 합니다.' })
+    .max(100, { error: 'limit은 100 이하여야 합니다.' })
+    .default(20),
+});
+
 export type SearchProductsInput = z.infer<typeof searchProductsSchema>;
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+export type ProductHistoryQuery = z.infer<typeof productHistoryQuerySchema>;

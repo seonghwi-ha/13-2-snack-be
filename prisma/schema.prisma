@@ -16,6 +16,12 @@ enum Role {
   SUPER_ADMIN // 최고 관리자
 }
 
+enum ProductHistoryAction {
+  CREATE // 등록
+  UPDATE // 수정
+  DELETE // 삭제 (소프트 삭제)
+}
+
 enum OrderStatus {
   PENDING // 승인 대기
   APPROVED // 승인 완료
@@ -31,12 +37,13 @@ model Organization {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  users       User[]
-  invitations Invitation[]
-  budgets     Budget[]
-  products    Product[]
-  orders      Order[]
-  images      Image[]
+  users            User[]
+  invitations      Invitation[]
+  budgets          Budget[]
+  products         Product[]
+  orders           Order[]
+  images           Image[]
+  productHistories ProductHistory[]
 }
 
 model User {
@@ -50,14 +57,15 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization  Organization   @relation(fields: [organizationId], references: [id])
-  account       Account?
-  products      Product[] // 내가 등록한 상품
-  cartItems     CartItem[]
-  wishlistItems WishlistItem[]
-  orders        Order[]        @relation("Requester") // 내가 요청한 구매
-  handledOrders Order[]        @relation("Handler") // 내가 승인/반려 처리한 구매 (담당자)
-  images        Image[] // 내가 업로드한 이미지
+  organization     Organization     @relation(fields: [organizationId], references: [id])
+  account          Account?
+  products         Product[] // 내가 등록한 상품
+  cartItems        CartItem[]
+  wishlistItems    WishlistItem[]
+  orders           Order[]          @relation("Requester") // 내가 요청한 구매
+  handledOrders    Order[]          @relation("Handler") // 내가 승인/반려 처리한 구매 (담당자)
+  images           Image[] // 내가 업로드한 이미지
+  productHistories ProductHistory[] // 내가 남긴 상품 변경 이력
 
   @@index([organizationId])
 }
@@ -122,12 +130,13 @@ model Product {
   updatedAt      DateTime @updatedAt
   organizationId Int
 
-  organization  Organization   @relation(fields: [organizationId], references: [id])
-  category      Category       @relation(fields: [categoryId], references: [id])
-  createdBy     User           @relation(fields: [createdById], references: [id])
+  organization  Organization     @relation(fields: [organizationId], references: [id])
+  category      Category         @relation(fields: [categoryId], references: [id])
+  createdBy     User             @relation(fields: [createdById], references: [id])
   cartItems     CartItem[]
   wishlistItems WishlistItem[]
   orderItems    OrderItem[]
+  histories     ProductHistory[]
 
   @@index([organizationId])
   @@index([categoryId])
@@ -154,6 +163,28 @@ model Image {
   organization Organization @relation(fields: [organizationId], references: [id])
 
   @@index([createdAt])
+}
+
+// 상품 변경 이력(감사 로그). 상품 변경과 같은 트랜잭션에서 남긴다.
+// changes 형식
+// - CREATE: 등록 시점 값 { name, price, ... }
+// - UPDATE: 실제로 바뀐 필드만 { price: { before: 1000, after: 1200 } }
+// - DELETE: null
+model ProductHistory {
+  id             Int                  @id @default(autoincrement())
+  productId      Int
+  organizationId Int
+  actorId        Int
+  action         ProductHistoryAction
+  changes        Json?
+  createdAt      DateTime             @default(now())
+
+  product      Product      @relation(fields: [productId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  actor        User         @relation(fields: [actorId], references: [id])
+
+  @@index([productId, id])
+  @@index([organizationId, createdAt])
 }
 
 model CartItem {

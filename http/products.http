@@ -301,6 +301,26 @@ GET {{baseUrl}}/products/{{myProductId}}
 # 이미 삭제된 상품은 조회 단계에서 없는 상품으로 처리됨
 DELETE {{baseUrl}}/products/{{myProductId}}
 
+### --- 변경 이력 (관리자 이상) ---
+
+### 33-1. 일반 유저가 이력 조회 (403 예상)
+# 위에서 일반 유저로 로그인한 상태라면 "상품 변경 이력은 관리자만 볼 수 있습니다."
+GET {{baseUrl}}/products/{{myProductId}}/history
+
+### 33-2. 로그인 - 관리자
+POST {{baseUrl}}/auth/signin
+Content-Type: application/json
+
+{ "email": "admin@snack.com", "password": "Password123!" }
+
+### 33-3. 삭제한 상품의 이력 조회 (200 예상)
+# 최신순으로 DELETE → UPDATE → CREATE. 같은 값으로 다시 저장한 수정은 남지 않음
+# @name historyFirst
+GET {{baseUrl}}/products/{{myProductId}}/history?limit=2
+
+### 33-4. 이력 다음 묶음 (200 예상)
+GET {{baseUrl}}/products/{{myProductId}}/history?limit=2&cursor={{historyFirst.response.body.data.nextCursor}}
+
 ### --- 인증 ---
 
 ### 34. 로그아웃
