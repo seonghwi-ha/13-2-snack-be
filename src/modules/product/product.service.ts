@@ -4,6 +4,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import { decodeProductCursor, encodeProductCursor } from './product.cursor';
 import * as productRepository from './product.repository';
 import type { ProductDetail, ProductListItem } from './product.repository';
 import type {
@@ -41,12 +42,15 @@ function withOwnership(
 
 type SearchProductsResult = {
   products: ProductListItem[];
-  page: number;
   limit: number;
   totalCount: number;
-  totalPages: number;
   /** 상품 리스트가 무한 스크롤이라 다음 페이지를 요청할지 이 값으로 판단한다. */
   hasNext: boolean;
+  /** 다음 요청의 cursor로 그대로 보낸다. 다음 페이지가 없으면 null. */
+  nextCursor: string | null;
+  // 오프셋 방식(page) 응답에만 있다. 커서 방식에서는 위치를 페이지 번호로 말할 수 없다.
+  page?: number;
+  totalPages?: number;
 };
 
 type CreateProductParams = CreateProductInput & {
@@ -106,16 +110,43 @@ export async function searchProducts({
   categoryId,
   parentCategoryId,
   sort,
+  cursor,
   page,
   limit,
 }: SearchProductsParams): Promise<SearchProductsResult> {
-  const [products, totalCount] = await productRepository.findMany({
+  const filters = {
     organizationId,
     createdById,
     keyword,
     categoryId,
     parentCategoryId,
     sort,
+  };
+
+  // 커서 방식: 한 개 더 읽어서 다음 페이지가 있는지 판단한다.
+  if (cursor) {
+    const [rows, totalCount] = await productRepository.findMany({
+      ...filters,
+      cursor: decodeProductCursor(cursor, sort),
+      take: limit + 1,
+    });
+
+    const hasNext = rows.length > limit;
+    const products = rows.slice(0, limit);
+
+    return {
+      products,
+      limit,
+      totalCount,
+      hasNext,
+      nextCursor: hasNext
+        ? encodeProductCursor(sort, products[products.length - 1])
+        : null,
+    };
+  }
+
+  const [products, totalCount] = await productRepository.findMany({
+    ...filters,
     skip: (page - 1) * limit,
     take: limit,
   });
@@ -130,13 +161,20 @@ export async function searchProducts({
     throw new BadRequestError(`page는 ${lastPage} 이하여야 합니다.`);
   }
 
+  const hasNext = page < totalPages;
+
   return {
     products,
     page,
     limit,
     totalCount,
     totalPages,
-    hasNext: page < totalPages,
+    hasNext,
+    // 첫 페이지는 page로 받고 이어서 커서로 넘어갈 수 있게 오프셋 응답에도 넣는다.
+    nextCursor:
+      hasNext && products.length > 0
+        ? encodeProductCursor(sort, products[products.length - 1])
+        : null,
   };
 }
 

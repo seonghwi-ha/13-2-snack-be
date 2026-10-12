@@ -47,6 +47,14 @@
  *         minimum: 1
  *         default: 1
  *       description: 마지막 페이지를 넘으면 400
+ *     ProductCursor:
+ *       in: query
+ *       name: cursor
+ *       schema:
+ *         type: string
+ *       description: |
+ *         커서 방식 페이지네이션. 이전 응답의 nextCursor를 그대로 보낸다.
+ *         있으면 page는 무시한다. 정렬을 바꾸면 이전 커서는 400(INVALID_CURSOR)
  *     ProductLimit:
  *       in: query
  *       name: limit
@@ -159,6 +167,7 @@
  *         page:
  *           type: integer
  *           example: 1
+ *           description: page로 요청했을 때만 있음
  *         limit:
  *           type: integer
  *           example: 10
@@ -168,9 +177,15 @@
  *         totalPages:
  *           type: integer
  *           example: 3
+ *           description: page로 요청했을 때만 있음
  *         hasNext:
  *           type: boolean
  *           example: true
+ *         nextCursor:
+ *           type: string
+ *           nullable: true
+ *           description: 다음 묶음 요청에 cursor로 보낼 값. 다음 페이지가 없으면 null
+ *           example: eyJzb3J0IjoibGF0ZXN0IiwidmFsdWUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwLjAwMFoiLCJpZCI6MTJ9
  *     CreateProductRequest:
  *       type: object
  *       required: [name, price, categoryId]
@@ -236,6 +251,7 @@
  *       - $ref: '#/components/parameters/ProductCategoryId'
  *       - $ref: '#/components/parameters/ProductParentCategoryId'
  *       - $ref: '#/components/parameters/ProductSort'
+ *       - $ref: '#/components/parameters/ProductCursor'
  *       - $ref: '#/components/parameters/ProductPage'
  *       - $ref: '#/components/parameters/ProductLimit'
  *     responses:
@@ -302,6 +318,7 @@
  *       - $ref: '#/components/parameters/ProductCategoryId'
  *       - $ref: '#/components/parameters/ProductParentCategoryId'
  *       - $ref: '#/components/parameters/ProductSort'
+ *       - $ref: '#/components/parameters/ProductCursor'
  *       - $ref: '#/components/parameters/ProductPage'
  *       - $ref: '#/components/parameters/ProductLimit'
  *     responses:

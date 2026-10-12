@@ -79,6 +79,13 @@ export const searchProductsSchema = z.object({
     })
     .default('latest'),
 
+  // 커서 방식 페이지네이션. 응답의 nextCursor를 그대로 보내며, 있으면 page는 무시한다.
+  cursor: z
+    .string({ error: 'cursor는 문자열이어야 합니다.' })
+    .trim()
+    .min(1, { error: 'cursor가 비어 있습니다.' })
+    .optional(),
+
   page: z.coerce
     .number({ error: 'page는 숫자여야 합니다.' })
     .int({ error: 'page는 정수여야 합니다.' })

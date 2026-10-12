@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma';
 import { Prisma } from '../../generated/prisma/client';
+import { type ProductCursor, buildCursorWhere } from './product.cursor';
 import type { ProductSort } from './product.schema';
 
 type FindManyParams = {
@@ -10,7 +11,9 @@ type FindManyParams = {
   categoryId?: number;
   parentCategoryId?: number;
   sort: ProductSort;
-  skip: number;
+  // 오프셋 방식은 skip, 커서 방식은 cursor를 넣는다. 둘 다 없으면 처음부터 읽는다.
+  skip?: number;
+  cursor?: ProductCursor;
   take: number;
 };
 
@@ -139,6 +142,7 @@ export async function findMany({
   parentCategoryId,
   sort,
   skip,
+  cursor,
   take,
 }: FindManyParams): Promise<[ProductListItem[], number]> {
   const where = buildWhere({
@@ -149,9 +153,10 @@ export async function findMany({
     parentCategoryId,
   });
 
+  // totalCount는 커서 위치와 상관없이 조건에 맞는 전체 개수다.
   const [rows, totalCount] = await Promise.all([
     prisma.product.findMany({
-      where,
+      where: cursor ? { AND: [where, buildCursorWhere(cursor)] } : where,
       select: productListArgs.select,
       orderBy: ORDER_BY[sort],
       skip,

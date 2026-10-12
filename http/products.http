@@ -57,6 +57,22 @@ GET {{baseUrl}}/products?keyword=존재하지않는상품
 # "page는 1 이하여야 합니다."
 GET {{baseUrl}}/products?keyword=존재하지않는상품&page=2
 
+### 4-4. 커서 방식 - 첫 묶음 (200 예상)
+# 첫 요청은 page로 보내고, 응답의 nextCursor로 이어서 요청한다.
+# @name cursorFirst
+GET {{baseUrl}}/products?limit=5
+
+### 4-5. 커서 방식 - 다음 묶음 (200 예상)
+# page, totalPages 없이 products, totalCount, hasNext, nextCursor만 온다.
+GET {{baseUrl}}/products?limit=5&cursor={{cursorFirst.response.body.data.nextCursor}}
+
+### 4-6. 정렬을 바꾸고 이전 커서를 보냄 (400 예상)
+# code INVALID_CURSOR, "올바르지 않은 커서입니다."
+GET {{baseUrl}}/products?limit=5&sort=popular&cursor={{cursorFirst.response.body.data.nextCursor}}
+
+### 4-7. 조작한 커서 (400 예상)
+GET {{baseUrl}}/products?cursor=not-a-cursor
+
 ### 5. 이름 검색 (200 예상)
 # 초코파이만 나와야 함
 GET {{baseUrl}}/products?keyword=초코

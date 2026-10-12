@@ -4,6 +4,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import { encodeProductCursor } from './product.cursor';
 import * as productRepository from './product.repository';
 import type { ProductDetail } from './product.repository';
 import * as productService from './product.service';
@@ -19,6 +20,20 @@ const OTHER_USER_ID = 20;
 
 function requester(userId: number, role: Role = Role.GENERAL) {
   return { userId, role, organizationId: ORGANIZATION_ID };
+}
+
+function listItem(id: number) {
+  return {
+    id,
+    name: `상품 ${id}`,
+    price: 1000,
+    imageUrl: null,
+    productUrl: null,
+    purchaseCount: 0,
+    createdAt: new Date('2026-09-01'),
+    category: { id: 101, name: '과자', parentId: 1 },
+    wishlistCount: 0,
+  };
 }
 
 function productDetail(createdById: number): ProductDetail {
@@ -106,6 +121,80 @@ describe('상품 목록 조회 (searchProducts)', () => {
     await expect(promise).rejects.toThrow(
       new BadRequestError('page는 3 이하여야 합니다.'),
     );
+  });
+});
+
+describe('상품 목록 커서 방식 (searchProducts + cursor)', () => {
+  const baseParams = {
+    organizationId: ORGANIZATION_ID,
+    sort: 'latest' as const,
+    page: 1,
+    limit: 2,
+  };
+
+  test('오프셋 응답에도 다음 페이지용 커서를 준다', async () => {
+    repository.findMany.mockResolvedValue([[listItem(5), listItem(4)], 5]);
+
+    const result = await productService.searchProducts(baseParams);
+
+    expect(result.nextCursor).toBe(encodeProductCursor('latest', listItem(4)));
+  });
+
+  test('커서가 있으면 page를 무시하고 limit보다 하나 더 읽는다', async () => {
+    repository.findMany.mockResolvedValue([[], 5]);
+    const cursor = encodeProductCursor('latest', listItem(4));
+
+    await productService.searchProducts({ ...baseParams, page: 9, cursor });
+
+    const params = repository.findMany.mock.calls[0][0];
+    expect(params).toMatchObject({
+      take: 3,
+      cursor: { sort: 'latest', id: 4 },
+    });
+    expect(params.skip).toBeUndefined();
+  });
+
+  test('한 개 더 읽혔으면 잘라내고 마지막 상품으로 다음 커서를 만든다', async () => {
+    repository.findMany.mockResolvedValue([
+      [listItem(3), listItem(2), listItem(1)],
+      5,
+    ]);
+    const cursor = encodeProductCursor('latest', listItem(4));
+
+    const result = await productService.searchProducts({
+      ...baseParams,
+      cursor,
+    });
+
+    expect(result.products.map((product) => product.id)).toEqual([3, 2]);
+    expect(result).toMatchObject({ hasNext: true, totalCount: 5 });
+    expect(result.nextCursor).toBe(encodeProductCursor('latest', listItem(2)));
+    expect(result).not.toHaveProperty('page');
+  });
+
+  test('마지막 묶음이면 hasNext가 false이고 nextCursor는 null이다', async () => {
+    repository.findMany.mockResolvedValue([[listItem(1)], 5]);
+    const cursor = encodeProductCursor('latest', listItem(2));
+
+    const result = await productService.searchProducts({
+      ...baseParams,
+      cursor,
+    });
+
+    expect(result).toMatchObject({ hasNext: false, nextCursor: null });
+  });
+
+  test('정렬과 맞지 않는 커서는 조회 전에 400을 던진다', async () => {
+    const cursor = encodeProductCursor('latest', listItem(4));
+
+    const promise = productService.searchProducts({
+      ...baseParams,
+      sort: 'popular',
+      cursor,
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(BadRequestError);
+    expect(repository.findMany).not.toHaveBeenCalled();
   });
 });
 
