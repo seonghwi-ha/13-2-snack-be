@@ -30,16 +30,21 @@ function nullableUrlSchema(message: string) {
 
 // 업로드한 이미지는 우리 이미지 API 경로(`/api/images/...`)로 오고 외부 URL이 아니다.
 // 외부 이미지 주소도 아직 허용해야 해서 절대 URL과 내부 경로를 둘 다 받는다.
+// 문자열 후보가 둘이라 둘 다 실패하면 Zod가 "Invalid input"으로 뭉뚱그리므로
+// union 자체에도 메시지를 준다.
 function nullableImageUrlSchema(message: string) {
   return z
     .preprocess(
       (value) => (typeof value === 'string' ? value.trim() : value),
-      z.union([
-        z.literal(''),
-        z.null(),
-        z.string().regex(/^\/[^\s]*$/, { error: message }),
-        z.url({ error: message }),
-      ]),
+      z.union(
+        [
+          z.literal(''),
+          z.null(),
+          z.string().regex(/^\/[^\s]*$/, { error: message }),
+          z.url({ error: message }),
+        ],
+        { error: message },
+      ),
     )
     .transform((value) => (value === '' ? null : value));
 }
@@ -73,6 +78,13 @@ export const searchProductsSchema = z.object({
       error: '정렬 조건은 latest, popular, priceAsc, priceDesc만 가능합니다.',
     })
     .default('latest'),
+
+  // 커서 방식 페이지네이션. 응답의 nextCursor를 그대로 보내며, 있으면 page는 무시한다.
+  cursor: z
+    .string({ error: 'cursor는 문자열이어야 합니다.' })
+    .trim()
+    .min(1, { error: 'cursor가 비어 있습니다.' })
+    .optional(),
 
   page: z.coerce
     .number({ error: 'page는 숫자여야 합니다.' })
@@ -131,6 +143,23 @@ export const updateProductSchema = createProductSchema
     error: '수정할 내용이 없습니다.',
   });
 
+export const productHistoryQuerySchema = z.object({
+  // 응답의 nextCursor. 이 이력보다 오래된 이력부터 읽는다.
+  cursor: z.coerce
+    .number({ error: 'cursor는 숫자여야 합니다.' })
+    .int({ error: 'cursor는 정수여야 합니다.' })
+    .positive({ error: 'cursor는 1 이상이어야 합니다.' })
+    .optional(),
+
+  limit: z.coerce
+    .number({ error: 'limit은 숫자여야 합니다.' })
+    .int({ error: 'limit은 정수여야 합니다.' })
+    .min(1, { error: 'limit은 1 이상이어야 합니다.' })
+    .max(100, { error: 'limit은 100 이하여야 합니다.' })
+    .default(20),
+});
+
 export type SearchProductsInput = z.infer<typeof searchProductsSchema>;
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;
+export type ProductHistoryQuery = z.infer<typeof productHistoryQuerySchema>;

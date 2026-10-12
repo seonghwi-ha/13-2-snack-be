@@ -100,19 +100,27 @@ GET {{baseUrl}}/images/private/users/1/document.png
 # https://버킷이름.s3.ap-northeast-2.amazonaws.com/{imageKey}
 # 프라이빗 버킷이라 AccessDenied가 나와야 정상입니다.
 
-### --- 삭제 (관리자 이상) ---
+### --- 삭제 (업로드한 본인 또는 같은 조직 관리자 이상) ---
 
-### 11. 일반 유저가 삭제 시도 (403 예상)
-DELETE {{baseUrl}}/images/{{imageKey}}
-
-### 12. 로그인 - 관리자
+### 11. 로그인 - 다른 일반 유저
 POST {{baseUrl}}/auth/signin
 Content-Type: application/json
 
-{ "email": "admin@snack.com", "password": "Password123!" }
+{ "email": "staff01@snack.com", "password": "Password123!" }
 
-### 13. 관리자가 삭제 (200 예상)
+### 12. 남이 올린 이미지 삭제 시도 (403 예상)
+# "본인이 올린 이미지만 삭제할 수 있습니다."
 DELETE {{baseUrl}}/images/{{imageKey}}
 
-### 14. 삭제한 이미지 조회 (404 예상)
+### 13. 로그인 - 업로드한 본인
+POST {{baseUrl}}/auth/signin
+Content-Type: application/json
+
+{ "email": "user@snack.com", "password": "Password123!" }
+
+### 14. 업로드한 본인이 삭제 (200 예상)
+# 이 이미지를 쓰던 같은 조직 상품의 imageUrl도 null로 비워집니다.
+DELETE {{baseUrl}}/images/{{imageKey}}
+
+### 15. 삭제한 이미지 조회 (404 예상)
 GET {{baseUrl}}/images/{{imageKey}}

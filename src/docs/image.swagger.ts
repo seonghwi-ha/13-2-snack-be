@@ -78,6 +78,10 @@
  *       로그인 없이 호출할 수 있습니다. 응답은 JSON이 아니라 이미지 바이너리입니다.
  *       key는 슬래시를 포함한 전체 경로(public/products/...)이고, 상품 이미지 폴더 밖의 경로는 400입니다.
  *       응답은 Cache-Control: public, max-age=31536000, immutable로 캐시됩니다.
+ *
+ *       서버 설정 IMAGE_DELIVERY_MODE=redirect이면 이미지 대신 302로 리다이렉트합니다.
+ *       IMAGE_CDN_BASE_URL이 있으면 CloudFront 주소로, 없으면 1시간 유효한 S3 presigned URL로 보냅니다.
+ *       <img>와 next/image는 리다이렉트를 자동으로 따라가므로 프론트 수정은 필요 없습니다.
  *     tags: [Image]
  *     security: []
  *     parameters:
@@ -88,6 +92,8 @@
  *           type: string
  *         description: 업로드 응답의 imageKey (예 public/products/0b9e3c1a.jpg)
  *     responses:
+ *       302:
+ *         description: 리다이렉트 방식일 때 이미지 주소(Location 헤더)
  *       200:
  *         description: 이미지 바이너리
  *         content:
@@ -102,7 +108,9 @@
  *   delete:
  *     summary: 이미지 삭제
  *     description: |
- *       ADMIN, SUPER_ADMIN만 호출할 수 있습니다.
+ *       업로드한 본인 또는 같은 조직의 ADMIN, SUPER_ADMIN이 호출할 수 있습니다.
+ *       업로드 기록이 없는 예전 이미지는 ADMIN, SUPER_ADMIN만 지울 수 있습니다.
+ *       삭제하면 같은 조직에서 이 이미지를 쓰던 상품의 imageUrl도 null로 비웁니다.
  *       S3는 없는 key를 삭제해도 성공으로 응답하므로 이미 없는 이미지도 200입니다.
  *     tags: [Image]
  *     parameters:
@@ -134,4 +142,6 @@
  *         $ref: '#/components/responses/Unauthorized'
  *       403:
  *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
  */

@@ -4,10 +4,20 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import {
+  getCachedProductList,
+  invalidateProductListCache,
+} from './product.cache';
+import { decodeProductCursor, encodeProductCursor } from './product.cursor';
 import * as productRepository from './product.repository';
-import type { ProductDetail, ProductListItem } from './product.repository';
+import type {
+  ProductDetail,
+  ProductHistoryItem,
+  ProductListItem,
+} from './product.repository';
 import type {
   CreateProductInput,
+  ProductHistoryQuery,
   SearchProductsInput,
   UpdateProductInput,
 } from './product.schema';
@@ -41,13 +51,39 @@ function withOwnership(
 
 type SearchProductsResult = {
   products: ProductListItem[];
-  page: number;
   limit: number;
   totalCount: number;
-  totalPages: number;
   /** 상품 리스트가 무한 스크롤이라 다음 페이지를 요청할지 이 값으로 판단한다. */
   hasNext: boolean;
+  /** 다음 요청의 cursor로 그대로 보낸다. 다음 페이지가 없으면 null. */
+  nextCursor: string | null;
+  /** 키워드 검색 결과가 0건일 때 비슷한 상품명("혹시 이 상품을 찾으셨나요?"). 그 밖에는 빈 배열. */
+  suggestions: string[];
+  // 오프셋 방식(page) 응답에만 있다. 커서 방식에서는 위치를 페이지 번호로 말할 수 없다.
+  page?: number;
+  totalPages?: number;
 };
+
+const SUGGESTION_COUNT = 5;
+
+// 오타로 검색 결과가 비었을 때만 비슷한 상품명을 찾는다. 결과가 있으면 추가 쿼리를 하지 않는다.
+async function findSuggestions(
+  {
+    organizationId,
+    createdById,
+    keyword,
+  }: Pick<SearchProductsParams, 'organizationId' | 'createdById' | 'keyword'>,
+  totalCount: number,
+): Promise<string[]> {
+  if (!keyword || totalCount > 0) return [];
+
+  return productRepository.findSimilarNames({
+    organizationId,
+    createdById,
+    keyword,
+    take: SUGGESTION_COUNT,
+  });
+}
 
 type CreateProductParams = CreateProductInput & {
   requester: Requester;
@@ -64,8 +100,8 @@ type DeleteProductParams = {
   requester: Requester;
 };
 
-// 없는 카테고리 id는 Prisma가 P2003을 던지는데 errorHandler가 처리하지 않아 500이 된다.
-// 사용자 입력 실수이므로 미리 확인해 400으로 내보낸다.
+// 없는 카테고리 id는 Prisma P2003이 되어 errorHandler가 일반 메시지의 400으로 응답한다.
+// 어떤 값이 잘못됐는지 알려주려고 미리 확인한다.
 async function assertCategoryExists(categoryId: number): Promise<void> {
   const category = await productRepository.findCategoryById(categoryId);
 
@@ -99,23 +135,58 @@ async function assertCanModify(
   }
 }
 
-export async function searchProducts({
+// 첫 화면 목록은 Redis에 잠깐 담아둔다. 조건은 product.cache.ts 참고
+export function searchProducts(
+  params: SearchProductsParams,
+): Promise<SearchProductsResult> {
+  return getCachedProductList(params, () => findProducts(params));
+}
+
+async function findProducts({
   organizationId,
   createdById,
   keyword,
   categoryId,
   parentCategoryId,
   sort,
+  cursor,
   page,
   limit,
 }: SearchProductsParams): Promise<SearchProductsResult> {
-  const [products, totalCount] = await productRepository.findMany({
+  const filters = {
     organizationId,
     createdById,
     keyword,
     categoryId,
     parentCategoryId,
     sort,
+  };
+
+  // 커서 방식: 한 개 더 읽어서 다음 페이지가 있는지 판단한다.
+  if (cursor) {
+    const [rows, totalCount] = await productRepository.findMany({
+      ...filters,
+      cursor: decodeProductCursor(cursor, sort),
+      take: limit + 1,
+    });
+
+    const hasNext = rows.length > limit;
+    const products = rows.slice(0, limit);
+
+    return {
+      products,
+      limit,
+      totalCount,
+      hasNext,
+      nextCursor: hasNext
+        ? encodeProductCursor(sort, products[products.length - 1])
+        : null,
+      suggestions: await findSuggestions(filters, totalCount),
+    };
+  }
+
+  const [products, totalCount] = await productRepository.findMany({
+    ...filters,
     skip: (page - 1) * limit,
     take: limit,
   });
@@ -130,13 +201,21 @@ export async function searchProducts({
     throw new BadRequestError(`page는 ${lastPage} 이하여야 합니다.`);
   }
 
+  const hasNext = page < totalPages;
+
   return {
     products,
     page,
     limit,
     totalCount,
     totalPages,
-    hasNext: page < totalPages,
+    hasNext,
+    // 첫 페이지는 page로 받고 이어서 커서로 넘어갈 수 있게 오프셋 응답에도 넣는다.
+    nextCursor:
+      hasNext && products.length > 0
+        ? encodeProductCursor(sort, products[products.length - 1])
+        : null,
+    suggestions: await findSuggestions(filters, totalCount),
   };
 }
 
@@ -170,6 +249,7 @@ export async function createProduct({
     // 조직은 body로 받지 않는다. 받으면 다른 회사에 상품을 등록할 수 있다.
     organizationId: requester.organizationId,
   });
+  await invalidateProductListCache(requester.organizationId);
 
   return withOwnership(product, requester.userId);
 }
@@ -185,7 +265,12 @@ export async function updateProduct({
     await assertCategoryExists(data.categoryId);
   }
 
-  const product = await productRepository.update(productId, data);
+  const product = await productRepository.update(
+    productId,
+    data,
+    requester.userId,
+  );
+  await invalidateProductListCache(requester.organizationId);
 
   return withOwnership(product, requester.userId);
 }
@@ -196,5 +281,59 @@ export async function deleteProduct({
 }: DeleteProductParams): Promise<{ id: number }> {
   await assertCanModify(productId, requester);
 
-  return productRepository.softDelete(productId);
+  const deleted = await productRepository.softDelete(
+    productId,
+    requester.userId,
+  );
+  await invalidateProductListCache(requester.organizationId);
+
+  return deleted;
+}
+
+type ProductHistoryResult = {
+  histories: ProductHistoryItem[];
+  hasNext: boolean;
+  /** 다음 요청의 cursor로 보낸다. 더 오래된 이력이 없으면 null. */
+  nextCursor: number | null;
+};
+
+/**
+ * 상품 변경 이력. 누가 언제 무엇을 바꿨는지 확인하는 감사용이라 같은 조직의 관리자 이상만 본다.
+ * 삭제된 상품도 이력은 볼 수 있다.
+ */
+export async function getProductHistory(
+  productId: number,
+  requester: Requester,
+  { cursor, limit }: ProductHistoryQuery,
+): Promise<ProductHistoryResult> {
+  const isAdmin =
+    requester.role === Role.ADMIN || requester.role === Role.SUPER_ADMIN;
+
+  if (!isAdmin) {
+    throw new ForbiddenError('상품 변경 이력은 관리자만 볼 수 있습니다.');
+  }
+
+  const product = await productRepository.existsInOrganization(
+    productId,
+    requester.organizationId,
+  );
+
+  if (!product) {
+    throw new NotFoundError('상품을 찾을 수 없습니다.');
+  }
+
+  const rows = await productRepository.findHistories({
+    productId,
+    beforeId: cursor,
+    take: limit + 1,
+  });
+
+  const hasNext = rows.length > limit;
+  const histories = rows.slice(0, limit);
+
+  return {
+    histories,
+    hasNext,
+    nextCursor: hasNext ? histories[histories.length - 1].id : null,
+  };
 }

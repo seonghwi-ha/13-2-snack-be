@@ -5,6 +5,7 @@ import {
   createMonthlyBudgetsOnStartup,
   startBudgetScheduler,
 } from './schedulers/budget.scheduler';
+import { startOrphanImageCleanupScheduler } from './schedulers/image.scheduler';
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -15,6 +16,9 @@ async function startServer() {
 
     //서버가 정상적으로 계속 켜져있었을 시에는 cron으로 새 Budget 데이터 생성
     startBudgetScheduler();
+
+    // 상품에 연결되지 않은 S3 이미지를 매일 정리
+    startOrphanImageCleanupScheduler();
 
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);

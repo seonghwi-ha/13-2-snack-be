@@ -16,7 +16,7 @@
  *       name: keyword
  *       schema:
  *         type: string
- *       description: 상품명 검색어 (대소문자 구분 없이 부분 일치)
+ *       description: 상품명 검색어 (대소문자 구분 없이 부분 일치). 결과가 없으면 응답의 suggestions에 비슷한 상품명을 준다
  *     ProductCategoryId:
  *       in: query
  *       name: categoryId
@@ -47,6 +47,14 @@
  *         minimum: 1
  *         default: 1
  *       description: 마지막 페이지를 넘으면 400
+ *     ProductCursor:
+ *       in: query
+ *       name: cursor
+ *       schema:
+ *         type: string
+ *       description: |
+ *         커서 방식 페이지네이션. 이전 응답의 nextCursor를 그대로 보낸다.
+ *         있으면 page는 무시한다. 정렬을 바꾸면 이전 커서는 400(INVALID_CURSOR)
  *     ProductLimit:
  *       in: query
  *       name: limit
@@ -159,6 +167,7 @@
  *         page:
  *           type: integer
  *           example: 1
+ *           description: page로 요청했을 때만 있음
  *         limit:
  *           type: integer
  *           example: 10
@@ -168,9 +177,23 @@
  *         totalPages:
  *           type: integer
  *           example: 3
+ *           description: page로 요청했을 때만 있음
  *         hasNext:
  *           type: boolean
  *           example: true
+ *         nextCursor:
+ *           type: string
+ *           nullable: true
+ *           description: 다음 묶음 요청에 cursor로 보낼 값. 다음 페이지가 없으면 null
+ *           example: eyJzb3J0IjoibGF0ZXN0IiwidmFsdWUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwLjAwMFoiLCJpZCI6MTJ9
+ *         suggestions:
+ *           type: array
+ *           items:
+ *             type: string
+ *           description: |
+ *             keyword 검색 결과가 0건일 때 비슷한 상품명(최대 5개, 유사도 높은 순).
+ *             오타 검색에 "혹시 이 상품을 찾으셨나요?"를 보여줄 때 쓴다. 그 밖에는 빈 배열
+ *           example: [농심 새우깡, 새우깡]
  *     CreateProductRequest:
  *       type: object
  *       required: [name, price, categoryId]
@@ -236,6 +259,7 @@
  *       - $ref: '#/components/parameters/ProductCategoryId'
  *       - $ref: '#/components/parameters/ProductParentCategoryId'
  *       - $ref: '#/components/parameters/ProductSort'
+ *       - $ref: '#/components/parameters/ProductCursor'
  *       - $ref: '#/components/parameters/ProductPage'
  *       - $ref: '#/components/parameters/ProductLimit'
  *     responses:
@@ -302,6 +326,7 @@
  *       - $ref: '#/components/parameters/ProductCategoryId'
  *       - $ref: '#/components/parameters/ProductParentCategoryId'
  *       - $ref: '#/components/parameters/ProductSort'
+ *       - $ref: '#/components/parameters/ProductCursor'
  *       - $ref: '#/components/parameters/ProductPage'
  *       - $ref: '#/components/parameters/ProductLimit'
  *     responses:
@@ -437,6 +462,86 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ * /products/{id}/history:
+ *   get:
+ *     summary: 상품 변경 이력 조회
+ *     description: |
+ *       같은 조직의 ADMIN, SUPER_ADMIN만 볼 수 있습니다. 삭제된 상품의 이력도 볼 수 있습니다.
+ *       최신순이며 changes 형식은 action에 따라 다릅니다.
+ *       - CREATE: 등록 시점 값 { name, price, categoryId, imageUrl, productUrl }
+ *       - UPDATE: 실제로 바뀐 필드만 { price: { before, after } }
+ *       - DELETE: null
+ *     tags: [Product]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: integer
+ *         description: 이전 응답의 nextCursor. 이 이력보다 오래된 이력부터 조회
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: 조회 성공
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         histories:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 2
+ *                               action:
+ *                                 type: string
+ *                                 enum: [CREATE, UPDATE, DELETE]
+ *                               changes:
+ *                                 type: object
+ *                                 nullable: true
+ *                                 example:
+ *                                   price: { before: 1000, after: 1200 }
+ *                               createdAt:
+ *                                 type: string
+ *                                 format: date-time
+ *                               actor:
+ *                                 type: object
+ *                                 properties:
+ *                                   id:
+ *                                     type: integer
+ *                                   name:
+ *                                     type: string
+ *                         hasNext:
+ *                           type: boolean
+ *                         nextCursor:
+ *                           type: integer
+ *                           nullable: true
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
  *       404:
  *         $ref: '#/components/responses/NotFound'
  */

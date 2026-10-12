@@ -35,8 +35,9 @@
 | -------------- | --------------------------------------------------------------- |
 | Runtime        | Node.js 24, TypeScript                                          |
 | Framework      | Express 5                                                       |
-| Database / ORM | PostgreSQL, Prisma 7 (`@prisma/adapter-pg`)                     |
+| Database / ORM | PostgreSQL (`pg_trgm`), Prisma 7 (`@prisma/adapter-pg`)         |
 | Auth           | JWT (`jsonwebtoken`, `express-jwt`), HttpOnly Cookie, bcrypt    |
+| Cache          | Redis (`ioredis`, 선택)                                         |
 | Validation     | Zod                                                             |
 | Infra          | AWS EC2, AWS S3 (`@aws-sdk/client-s3`, `multer-s3`), PM2        |
 | 기타           | Nodemailer, node-cron, dayjs, express-rate-limit, Swagger, Jest |
@@ -176,20 +177,20 @@ sequenceDiagram
 
 전체 요청·응답 명세는 Swagger UI(`/docs`)에서 확인할 수 있습니다.
 
-| 도메인     | 엔드포인트                                                             | 설명                                      |
-| ---------- | ---------------------------------------------------------------------- | ----------------------------------------- |
-| Auth       | `/auth/signup` `/auth/signin` `/auth/signout` `/auth/refresh-token`    | 최고관리자·초대 가입, 로그인, 토큰 재발급 |
-|            | `/auth/password-reset`                                                 | 재설정 메일 요청, 새 비밀번호 설정        |
-| Invitation | `/invitations/:token`                                                  | 초대 정보 조회                            |
-| Me         | `/me` `/me/profile`                                                    | 내 정보 조회, 비밀번호·회사명 변경        |
-| Product    | `/products` `/products/:id` `/me/products`                             | 상품 검색·정렬·등록·수정·소프트 삭제      |
-| Image      | `/images` `/images/*key`                                               | S3 업로드, 서버 경유 조회, 삭제           |
-| Cart       | `/me/cart-items`                                                       | 장바구니 담기·수량 변경·삭제              |
-| Wishlist   | `/me/wishlist`                                                         | 찜 추가·삭제·목록                         |
-| Order      | `/orders` `/me/orders`                                                 | 구매 요청, 내 요청 조회·취소              |
-|            | `/admin/orders` `/admin/orders/:id/approve` `/admin/orders/:id/reject` | 조직 구매 요청 조회, 승인·반려            |
-| Budget     | `/admin/budgets/summary` `/super-admin/budgets/setting`                | 지출 요약, 이번 달·기본 예산 설정         |
-| Member     | `/super-admin/invitations` `/super-admin/users`                        | 회원 초대, 검색, 권한 변경, 탈퇴 처리     |
+| 도메인     | 엔드포인트                                                             | 설명                                       |
+| ---------- | ---------------------------------------------------------------------- | ------------------------------------------ |
+| Auth       | `/auth/signup` `/auth/signin` `/auth/signout` `/auth/refresh-token`    | 최고관리자·초대 가입, 로그인, 토큰 재발급  |
+|            | `/auth/password-reset`                                                 | 재설정 메일 요청, 새 비밀번호 설정         |
+| Invitation | `/invitations/:token`                                                  | 초대 정보 조회                             |
+| Me         | `/me` `/me/profile`                                                    | 내 정보 조회, 비밀번호·회사명 변경         |
+| Product    | `/products` `/products/:id` `/me/products`                             | 상품 검색·정렬·등록·수정·소프트 삭제       |
+| Image      | `/images` `/images/*key`                                               | S3 업로드, 서버 경유·리다이렉트 조회, 삭제 |
+| Cart       | `/me/cart-items`                                                       | 장바구니 담기·수량 변경·삭제               |
+| Wishlist   | `/me/wishlist`                                                         | 찜 추가·삭제·목록                          |
+| Order      | `/orders` `/me/orders`                                                 | 구매 요청, 내 요청 조회·취소               |
+|            | `/admin/orders` `/admin/orders/:id/approve` `/admin/orders/:id/reject` | 조직 구매 요청 조회, 승인·반려             |
+| Budget     | `/admin/budgets/summary` `/super-admin/budgets/setting`                | 지출 요약, 이번 달·기본 예산 설정          |
+| Member     | `/super-admin/invitations` `/super-admin/users`                        | 회원 초대, 검색, 권한 변경, 탈퇴 처리      |
 
 ### 구매 요청과 예산 규칙
 

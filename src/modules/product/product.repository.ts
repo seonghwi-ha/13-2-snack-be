@@ -1,5 +1,11 @@
 import { prisma } from '../../config/prisma';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, ProductHistoryAction } from '../../generated/prisma/client';
+import { type ProductCursor, buildCursorWhere } from './product.cursor';
+import {
+  TRACKED_PRODUCT_FIELDS,
+  diffProduct,
+  toCreateSnapshot,
+} from './product.history';
 import type { ProductSort } from './product.schema';
 
 type FindManyParams = {
@@ -10,7 +16,9 @@ type FindManyParams = {
   categoryId?: number;
   parentCategoryId?: number;
   sort: ProductSort;
-  skip: number;
+  // 오프셋 방식은 skip, 커서 방식은 cursor를 넣는다. 둘 다 없으면 처음부터 읽는다.
+  skip?: number;
+  cursor?: ProductCursor;
   take: number;
 };
 
@@ -139,6 +147,7 @@ export async function findMany({
   parentCategoryId,
   sort,
   skip,
+  cursor,
   take,
 }: FindManyParams): Promise<[ProductListItem[], number]> {
   const where = buildWhere({
@@ -149,9 +158,10 @@ export async function findMany({
     parentCategoryId,
   });
 
+  // totalCount는 커서 위치와 상관없이 조건에 맞는 전체 개수다.
   const [rows, totalCount] = await Promise.all([
     prisma.product.findMany({
-      where,
+      where: cursor ? { AND: [where, buildCursorWhere(cursor)] } : where,
       select: productListArgs.select,
       orderBy: ORDER_BY[sort],
       skip,
@@ -195,32 +205,181 @@ export function findCategoryById(
   });
 }
 
+// 이력은 상품 변경과 같은 트랜잭션에서 남겨, 변경은 됐는데 이력이 없는 상태를 만들지 않는다.
 export async function create(data: CreateData): Promise<ProductDetail> {
-  const product = await prisma.product.create({
-    data,
-    select: productDetailArgs.select,
+  const product = await prisma.$transaction(async (tx) => {
+    const created = await tx.product.create({
+      data,
+      select: productDetailArgs.select,
+    });
+
+    await tx.productHistory.create({
+      data: {
+        productId: created.id,
+        organizationId: data.organizationId,
+        actorId: data.createdById,
+        action: ProductHistoryAction.CREATE,
+        changes: toCreateSnapshot(data),
+      },
+    });
+
+    return created;
   });
 
   return toDetail(product);
 }
+
+const trackedFieldsSelect = Object.fromEntries(
+  TRACKED_PRODUCT_FIELDS.map((field) => [field, true]),
+) as Record<(typeof TRACKED_PRODUCT_FIELDS)[number], true>;
 
 export async function update(
   productId: number,
   data: UpdateData,
+  actorId: number,
 ): Promise<ProductDetail> {
-  const product = await prisma.product.update({
-    where: { id: productId },
-    data,
-    select: productDetailArgs.select,
+  const product = await prisma.$transaction(async (tx) => {
+    const before = await tx.product.findUniqueOrThrow({
+      where: { id: productId },
+      select: { ...trackedFieldsSelect, organizationId: true },
+    });
+
+    const updated = await tx.product.update({
+      where: { id: productId },
+      data,
+      select: productDetailArgs.select,
+    });
+
+    const changes = diffProduct(before, data);
+
+    // 같은 값을 다시 저장한 요청은 이력을 남기지 않는다.
+    if (Object.keys(changes).length > 0) {
+      await tx.productHistory.create({
+        data: {
+          productId,
+          organizationId: before.organizationId,
+          actorId,
+          action: ProductHistoryAction.UPDATE,
+          changes,
+        },
+      });
+    }
+
+    return updated;
   });
 
   return toDetail(product);
 }
 
-export function softDelete(productId: number): Promise<{ id: number }> {
-  return prisma.product.update({
-    where: { id: productId },
-    data: { isDeleted: true },
+export function softDelete(
+  productId: number,
+  actorId: number,
+): Promise<{ id: number }> {
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.product.update({
+      where: { id: productId },
+      data: { isDeleted: true },
+      select: { id: true, organizationId: true },
+    });
+
+    await tx.productHistory.create({
+      data: {
+        productId,
+        organizationId: deleted.organizationId,
+        actorId,
+        action: ProductHistoryAction.DELETE,
+      },
+    });
+
+    return { id: deleted.id };
+  });
+}
+
+// 이력 조회는 삭제된 상품도 볼 수 있어야 해서 isDeleted를 보지 않는다.
+export function existsInOrganization(
+  productId: number,
+  organizationId: number,
+): Promise<{ id: number } | null> {
+  return prisma.product.findFirst({
+    where: { id: productId, organizationId },
     select: { id: true },
   });
+}
+
+const productHistoryArgs = {
+  select: {
+    id: true,
+    action: true,
+    changes: true,
+    createdAt: true,
+    actor: { select: { id: true, name: true } },
+  },
+} satisfies Prisma.ProductHistoryDefaultArgs;
+
+export type ProductHistoryItem = Prisma.ProductHistoryGetPayload<
+  typeof productHistoryArgs
+>;
+
+type FindHistoriesParams = {
+  productId: number;
+  // 이 id보다 오래된 이력부터 읽는다. id가 커질수록 최신이다.
+  beforeId?: number;
+  take: number;
+};
+
+export function findHistories({
+  productId,
+  beforeId,
+  take,
+}: FindHistoriesParams): Promise<ProductHistoryItem[]> {
+  return prisma.productHistory.findMany({
+    where: { productId, ...(beforeId ? { id: { lt: beforeId } } : {}) },
+    select: productHistoryArgs.select,
+    orderBy: { id: 'desc' },
+    take,
+  });
+}
+
+// 오타 추천 기준. 한글 상품명은 짧아서 pg_trgm 기본값(0.6)이면 한 글자 오타도 놓친다.
+// 예) '새우강' ↔ '새우깡' = 0.5, '코가콜라' ↔ '코카콜라 500ml' = 0.25
+const SIMILAR_NAME_MIN_SCORE = 0.25;
+// 기준을 낮춘 만큼 엉뚱한 이름이 섞이므로 가장 비슷한 이름 점수의 80% 이상만 남긴다.
+// 예) '포카침' → '오리온 포카칩'(0.5)은 남고 '3M 포스트잇'(0.25)은 빠진다.
+const SIMILAR_NAME_RELATIVE_SCORE = 0.8;
+
+type FindSimilarNamesParams = {
+  organizationId: number;
+  createdById?: number;
+  keyword: string;
+  take: number;
+};
+
+/**
+ * 키워드와 비슷한 상품명을 유사도 높은 순으로 돌려준다. 검색 결과가 없을 때만 부른다.
+ * word_similarity는 키워드가 상품명의 일부와 얼마나 닮았는지를 0~1로 잰다.
+ * 임계값을 함수로 직접 비교해서 트라이그램 인덱스를 타지 않으므로, 결과가 0건일 때만 쓴다.
+ */
+export async function findSimilarNames({
+  organizationId,
+  createdById,
+  keyword,
+  take,
+}: FindSimilarNamesParams): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ name: string; score: number }[]>`
+    SELECT "name", MAX(word_similarity(${keyword}, "name")) AS "score"
+    FROM "Product"
+    WHERE "organizationId" = ${organizationId}
+      AND "isDeleted" = false
+      ${createdById ? Prisma.sql`AND "createdById" = ${createdById}` : Prisma.empty}
+      AND word_similarity(${keyword}, "name") >= ${SIMILAR_NAME_MIN_SCORE}
+    GROUP BY "name"
+    ORDER BY "score" DESC, "name" ASC
+    LIMIT ${take}
+  `;
+
+  const topScore = rows[0]?.score ?? 0;
+
+  return rows
+    .filter((row) => row.score >= topScore * SIMILAR_NAME_RELATIVE_SCORE)
+    .map((row) => row.name);
 }

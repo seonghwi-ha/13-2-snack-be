@@ -57,9 +57,29 @@ GET {{baseUrl}}/products?keyword=존재하지않는상품
 # "page는 1 이하여야 합니다."
 GET {{baseUrl}}/products?keyword=존재하지않는상품&page=2
 
+### 4-4. 커서 방식 - 첫 묶음 (200 예상)
+# 첫 요청은 page로 보내고, 응답의 nextCursor로 이어서 요청한다.
+# @name cursorFirst
+GET {{baseUrl}}/products?limit=5
+
+### 4-5. 커서 방식 - 다음 묶음 (200 예상)
+# page, totalPages 없이 products, totalCount, hasNext, nextCursor만 온다.
+GET {{baseUrl}}/products?limit=5&cursor={{cursorFirst.response.body.data.nextCursor}}
+
+### 4-6. 정렬을 바꾸고 이전 커서를 보냄 (400 예상)
+# code INVALID_CURSOR, "올바르지 않은 커서입니다."
+GET {{baseUrl}}/products?limit=5&sort=popular&cursor={{cursorFirst.response.body.data.nextCursor}}
+
+### 4-7. 조작한 커서 (400 예상)
+GET {{baseUrl}}/products?cursor=not-a-cursor
+
 ### 5. 이름 검색 (200 예상)
 # 초코파이만 나와야 함
 GET {{baseUrl}}/products?keyword=초코
+
+### 5-0. 오타 검색 - 비슷한 상품명 추천 (200 예상)
+# products 빈 배열, suggestions ["농심 새우깡", "새우깡"]
+GET {{baseUrl}}/products?keyword=새우강
 
 ### 5-1. 영문 대소문자 무시 검색 (200 예상)
 # 14번으로 'Coca Cola Zero' 같은 영문 상품을 등록한 뒤 실행하세요.
@@ -280,6 +300,26 @@ GET {{baseUrl}}/products/{{myProductId}}
 ### 33. 삭제한 상품 재삭제 (404 예상)
 # 이미 삭제된 상품은 조회 단계에서 없는 상품으로 처리됨
 DELETE {{baseUrl}}/products/{{myProductId}}
+
+### --- 변경 이력 (관리자 이상) ---
+
+### 33-1. 일반 유저가 이력 조회 (403 예상)
+# 위에서 일반 유저로 로그인한 상태라면 "상품 변경 이력은 관리자만 볼 수 있습니다."
+GET {{baseUrl}}/products/{{myProductId}}/history
+
+### 33-2. 로그인 - 관리자
+POST {{baseUrl}}/auth/signin
+Content-Type: application/json
+
+{ "email": "admin@snack.com", "password": "Password123!" }
+
+### 33-3. 삭제한 상품의 이력 조회 (200 예상)
+# 최신순으로 DELETE → UPDATE → CREATE. 같은 값으로 다시 저장한 수정은 남지 않음
+# @name historyFirst
+GET {{baseUrl}}/products/{{myProductId}}/history?limit=2
+
+### 33-4. 이력 다음 묶음 (200 예상)
+GET {{baseUrl}}/products/{{myProductId}}/history?limit=2&cursor={{historyFirst.response.body.data.nextCursor}}
 
 ### --- 인증 ---
 

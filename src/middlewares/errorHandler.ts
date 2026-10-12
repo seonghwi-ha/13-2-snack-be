@@ -16,7 +16,8 @@ import { AppError } from '../types/errors';
   import 경로는 `../generated/prisma/client`
   (이 파일이 src/middlewares/에 있고, generator output이
   src/generated/prisma이므로 한 단계만 올라가면 됨)
-- P2003(FK 제약 위반) 등 아직 마주친 적 없는 코드는 필요 시 추가한다.
+- P2003(FK 제약 위반)은 400 INVALID_REFERENCE로 응답한다.
+  그 밖에 아직 마주친 적 없는 코드는 필요 시 추가한다.
 */
 
 const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
@@ -108,6 +109,16 @@ const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
         success: false,
         message: '이미 사용 중인 값입니다.',
         code: 'DUPLICATE_VALUE',
+      });
+    }
+
+    // 외래키 위반. 없는 카테고리·상품 id처럼 존재하지 않는 대상을 가리킨 요청이라
+    // 서버 오류(500)가 아니라 요청 오류(400)로 본다.
+    if (err.code === 'P2003') {
+      return res.status(400).json({
+        success: false,
+        message: '참조하는 대상이 존재하지 않습니다.',
+        code: 'INVALID_REFERENCE',
       });
     }
 
