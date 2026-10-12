@@ -77,6 +77,10 @@ GET {{baseUrl}}/products?cursor=not-a-cursor
 # 초코파이만 나와야 함
 GET {{baseUrl}}/products?keyword=초코
 
+### 5-0. 오타 검색 - 비슷한 상품명 추천 (200 예상)
+# products 빈 배열, suggestions ["농심 새우깡", "새우깡"]
+GET {{baseUrl}}/products?keyword=새우강
+
 ### 5-1. 영문 대소문자 무시 검색 (200 예상)
 # 14번으로 'Coca Cola Zero' 같은 영문 상품을 등록한 뒤 실행하세요.
 # 소문자로 검색해도 나와야 합니다. (Prisma mode: insensitive)

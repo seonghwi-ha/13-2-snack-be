@@ -16,7 +16,7 @@
  *       name: keyword
  *       schema:
  *         type: string
- *       description: 상품명 검색어 (대소문자 구분 없이 부분 일치)
+ *       description: 상품명 검색어 (대소문자 구분 없이 부분 일치). 결과가 없으면 응답의 suggestions에 비슷한 상품명을 준다
  *     ProductCategoryId:
  *       in: query
  *       name: categoryId
@@ -186,6 +186,14 @@
  *           nullable: true
  *           description: 다음 묶음 요청에 cursor로 보낼 값. 다음 페이지가 없으면 null
  *           example: eyJzb3J0IjoibGF0ZXN0IiwidmFsdWUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwLjAwMFoiLCJpZCI6MTJ9
+ *         suggestions:
+ *           type: array
+ *           items:
+ *             type: string
+ *           description: |
+ *             keyword 검색 결과가 0건일 때 비슷한 상품명(최대 5개, 유사도 높은 순).
+ *             오타 검색에 "혹시 이 상품을 찾으셨나요?"를 보여줄 때 쓴다. 그 밖에는 빈 배열
+ *           example: [농심 새우깡, 새우깡]
  *     CreateProductRequest:
  *       type: object
  *       required: [name, price, categoryId]

@@ -198,6 +198,55 @@ describe('상품 목록 커서 방식 (searchProducts + cursor)', () => {
   });
 });
 
+describe('검색 결과가 없을 때 상품명 추천', () => {
+  const baseParams = {
+    organizationId: ORGANIZATION_ID,
+    sort: 'latest' as const,
+    page: 1,
+    limit: 10,
+  };
+
+  test('키워드 검색 결과가 0건이면 같은 범위에서 비슷한 상품명을 추천한다', async () => {
+    repository.findMany.mockResolvedValue([[], 0]);
+    repository.findSimilarNames.mockResolvedValue(['새우깡']);
+
+    const result = await productService.searchProducts({
+      ...baseParams,
+      createdById: OWNER_ID,
+      keyword: '새우강',
+    });
+
+    expect(result.suggestions).toEqual(['새우깡']);
+    expect(repository.findSimilarNames).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION_ID,
+      createdById: OWNER_ID,
+      keyword: '새우강',
+      take: 5,
+    });
+  });
+
+  test('결과가 있으면 추천 쿼리를 하지 않는다', async () => {
+    repository.findMany.mockResolvedValue([[listItem(1)], 1]);
+
+    const result = await productService.searchProducts({
+      ...baseParams,
+      keyword: '새우깡',
+    });
+
+    expect(result.suggestions).toEqual([]);
+    expect(repository.findSimilarNames).not.toHaveBeenCalled();
+  });
+
+  test('키워드 없이 0건이면 추천하지 않는다', async () => {
+    repository.findMany.mockResolvedValue([[], 0]);
+
+    const result = await productService.searchProducts(baseParams);
+
+    expect(result.suggestions).toEqual([]);
+    expect(repository.findSimilarNames).not.toHaveBeenCalled();
+  });
+});
+
 describe('상품 상세 조회 (getProduct)', () => {
   test('등록자 본인이 보면 isMine이 true다', async () => {
     repository.findDetailById.mockResolvedValue(productDetail(OWNER_ID));

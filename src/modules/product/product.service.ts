@@ -48,10 +48,33 @@ type SearchProductsResult = {
   hasNext: boolean;
   /** 다음 요청의 cursor로 그대로 보낸다. 다음 페이지가 없으면 null. */
   nextCursor: string | null;
+  /** 키워드 검색 결과가 0건일 때 비슷한 상품명("혹시 이 상품을 찾으셨나요?"). 그 밖에는 빈 배열. */
+  suggestions: string[];
   // 오프셋 방식(page) 응답에만 있다. 커서 방식에서는 위치를 페이지 번호로 말할 수 없다.
   page?: number;
   totalPages?: number;
 };
+
+const SUGGESTION_COUNT = 5;
+
+// 오타로 검색 결과가 비었을 때만 비슷한 상품명을 찾는다. 결과가 있으면 추가 쿼리를 하지 않는다.
+async function findSuggestions(
+  {
+    organizationId,
+    createdById,
+    keyword,
+  }: Pick<SearchProductsParams, 'organizationId' | 'createdById' | 'keyword'>,
+  totalCount: number,
+): Promise<string[]> {
+  if (!keyword || totalCount > 0) return [];
+
+  return productRepository.findSimilarNames({
+    organizationId,
+    createdById,
+    keyword,
+    take: SUGGESTION_COUNT,
+  });
+}
 
 type CreateProductParams = CreateProductInput & {
   requester: Requester;
@@ -142,6 +165,7 @@ export async function searchProducts({
       nextCursor: hasNext
         ? encodeProductCursor(sort, products[products.length - 1])
         : null,
+      suggestions: await findSuggestions(filters, totalCount),
     };
   }
 
@@ -175,6 +199,7 @@ export async function searchProducts({
       hasNext && products.length > 0
         ? encodeProductCursor(sort, products[products.length - 1])
         : null,
+    suggestions: await findSuggestions(filters, totalCount),
   };
 }
 

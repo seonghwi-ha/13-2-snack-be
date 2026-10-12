@@ -136,6 +136,8 @@ model Product {
   @@index([organizationId, createdAt, id])
   @@index([organizationId, purchaseCount, id])
   @@index([organizationId, price, id])
+  // 상품명 부분 일치 검색(ILIKE '%키워드%')용 트라이그램 인덱스. pg_trgm 확장이 필요하다.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 // S3에 올린 상품 이미지 기록. 업로드한 사람이 삭제할 수 있게 하고,
