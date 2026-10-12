@@ -5,6 +5,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import { invalidateProductListCache } from '../product/product.cache';
 import { DELIVERY_FEE } from './order.constants';
 import * as orderRepository from './order.repository';
 
@@ -93,6 +94,8 @@ export async function createOrder(
       totalPrice,
       items: orderItems,
     });
+    // 즉시 구매로 상품 구매 수(인기순)가 바뀐다.
+    await invalidateProductListCache(orgId);
   } else {
     order = await orderRepository.createOrder({
       organizationId: orgId,
@@ -287,6 +290,8 @@ export async function approveOrder(
     handlerId,
     responseMessage: data.responseMessage,
   });
+  // 승인으로 상품 구매 수(인기순)가 바뀐다.
+  await invalidateProductListCache(orgId);
 
   return { id: updated.id, status: updated.status };
 }

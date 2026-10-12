@@ -4,6 +4,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import { invalidateProductListCache } from './product.cache';
 import { encodeProductCursor } from './product.cursor';
 import * as productRepository from './product.repository';
 import type { ProductDetail } from './product.repository';
@@ -11,6 +12,11 @@ import * as productService from './product.service';
 
 // DB 없이 서비스 규칙만 확인한다.
 jest.mock('./product.repository');
+// 캐시는 product.cache.test.ts에서 따로 확인하고, 여기서는 항상 원본을 읽게 한다.
+jest.mock('./product.cache', () => ({
+  getCachedProductList: (_params: unknown, load: () => unknown) => load(),
+  invalidateProductListCache: jest.fn(),
+}));
 
 const repository = jest.mocked(productRepository);
 
@@ -299,6 +305,7 @@ describe('상품 등록 (createProduct)', () => {
       organizationId: ORGANIZATION_ID,
     });
     expect(result.isMine).toBe(true);
+    expect(invalidateProductListCache).toHaveBeenCalledWith(ORGANIZATION_ID);
   });
 
   test('없는 카테고리면 저장하지 않고 400을 던진다', async () => {
@@ -330,6 +337,7 @@ describe('상품 수정·삭제 권한', () => {
     });
 
     expect(repository.update).toHaveBeenCalledWith(1, { price: 2000 });
+    expect(invalidateProductListCache).toHaveBeenCalledWith(ORGANIZATION_ID);
   });
 
   test.each([Role.ADMIN, Role.SUPER_ADMIN])(
@@ -344,6 +352,7 @@ describe('상품 수정·삭제 권한', () => {
       });
 
       expect(result).toEqual({ id: 1 });
+      expect(invalidateProductListCache).toHaveBeenCalledWith(ORGANIZATION_ID);
     },
   );
 
@@ -370,6 +379,7 @@ describe('상품 수정·삭제 권한', () => {
 
     await expect(promise).rejects.toBeInstanceOf(ForbiddenError);
     expect(repository.softDelete).not.toHaveBeenCalled();
+    expect(invalidateProductListCache).not.toHaveBeenCalled();
   });
 
   test('없거나 다른 조직의 상품이면 404를 던진다', async () => {

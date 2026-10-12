@@ -1,4 +1,5 @@
 import { ForbiddenError, NotFoundError } from '../../types/errors';
+import { invalidateProductListCache } from '../product/product.cache';
 import * as wishlistRepository from './wishlist.repository';
 import type { WishlistListRow } from './wishlist.repository';
 
@@ -33,11 +34,14 @@ type AddWishlistItemParams = {
 
 type RemoveWishlistItemParams = {
   userId: number;
+  // 상품 목록 캐시(wishlistCount) 무효화에 쓴다.
+  organizationId: number;
   productId: number;
 };
 
 type RemoveWishlistItemsParams = {
   userId: number;
+  organizationId: number;
   productIds: number[];
 };
 
@@ -89,25 +93,33 @@ export async function addWishlistItem({
     throw new ForbiddenError('다른 조직의 상품은 찜할 수 없습니다.');
   }
 
-  return wishlistRepository.upsert(userId, productId);
+  const result = await wishlistRepository.upsert(userId, productId);
+  // 상품 목록의 찜 개수가 바뀐다.
+  await invalidateProductListCache(organizationId);
+
+  return result;
 }
 
 export async function removeWishlistItem({
   userId,
+  organizationId,
   productId,
 }: RemoveWishlistItemParams): Promise<{
   productId: number;
   deletedCount: number;
 }> {
   const { count } = await wishlistRepository.deleteOne(userId, productId);
+  if (count > 0) await invalidateProductListCache(organizationId);
 
   return { productId, deletedCount: count };
 }
 
 export async function removeWishlistItems({
   userId,
+  organizationId,
   productIds,
 }: RemoveWishlistItemsParams): Promise<{ deletedCount: number }> {
   const { count } = await wishlistRepository.deleteMany(userId, productIds);
+  if (count > 0) await invalidateProductListCache(organizationId);
   return { deletedCount: count };
 }

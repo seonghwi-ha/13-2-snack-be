@@ -62,6 +62,7 @@ export async function removeWishlistItem(
 
   const result = await wishlistService.removeWishlistItem({
     userId: req.auth!.userId,
+    organizationId: req.auth!.organizationId,
     productId,
   });
 
@@ -79,6 +80,7 @@ export async function removeWishlistItems(
 
   const result = await wishlistService.removeWishlistItems({
     userId: req.auth!.userId,
+    organizationId: req.auth!.organizationId,
     productIds,
   });
 

@@ -4,6 +4,10 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '../../types/errors';
+import {
+  getCachedProductList,
+  invalidateProductListCache,
+} from './product.cache';
 import { decodeProductCursor, encodeProductCursor } from './product.cursor';
 import * as productRepository from './product.repository';
 import type { ProductDetail, ProductListItem } from './product.repository';
@@ -126,7 +130,14 @@ async function assertCanModify(
   }
 }
 
-export async function searchProducts({
+// 첫 화면 목록은 Redis에 잠깐 담아둔다. 조건은 product.cache.ts 참고
+export function searchProducts(
+  params: SearchProductsParams,
+): Promise<SearchProductsResult> {
+  return getCachedProductList(params, () => findProducts(params));
+}
+
+async function findProducts({
   organizationId,
   createdById,
   keyword,
@@ -233,6 +244,7 @@ export async function createProduct({
     // 조직은 body로 받지 않는다. 받으면 다른 회사에 상품을 등록할 수 있다.
     organizationId: requester.organizationId,
   });
+  await invalidateProductListCache(requester.organizationId);
 
   return withOwnership(product, requester.userId);
 }
@@ -249,6 +261,7 @@ export async function updateProduct({
   }
 
   const product = await productRepository.update(productId, data);
+  await invalidateProductListCache(requester.organizationId);
 
   return withOwnership(product, requester.userId);
 }
@@ -259,5 +272,8 @@ export async function deleteProduct({
 }: DeleteProductParams): Promise<{ id: number }> {
   await assertCanModify(productId, requester);
 
-  return productRepository.softDelete(productId);
+  const deleted = await productRepository.softDelete(productId);
+  await invalidateProductListCache(requester.organizationId);
+
+  return deleted;
 }

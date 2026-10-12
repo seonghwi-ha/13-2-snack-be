@@ -35,8 +35,9 @@
 | -------------- | --------------------------------------------------------------- |
 | Runtime        | Node.js 24, TypeScript                                          |
 | Framework      | Express 5                                                       |
-| Database / ORM | PostgreSQL, Prisma 7 (`@prisma/adapter-pg`)                     |
+| Database / ORM | PostgreSQL (`pg_trgm`), Prisma 7 (`@prisma/adapter-pg`)         |
 | Auth           | JWT (`jsonwebtoken`, `express-jwt`), HttpOnly Cookie, bcrypt    |
+| Cache          | Redis (`ioredis`, 선택)                                         |
 | Validation     | Zod                                                             |
 | Infra          | AWS EC2, AWS S3 (`@aws-sdk/client-s3`, `multer-s3`), PM2        |
 | 기타           | Nodemailer, node-cron, dayjs, express-rate-limit, Swagger, Jest |
