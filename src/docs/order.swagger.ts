@@ -225,7 +225,20 @@
  *
  *       수량은 바디 값을 쓰고 가격은 서버가 상품 가격으로 다시 계산하며 배송비 3,000원이 더해집니다.
  *       요청에 쓰인 장바구니 항목은 삭제됩니다. 완료 화면은 응답이 아니라 상세 조회로 그립니다.
+ *
+ *       같은 장바구니 항목으로 동시에 요청하면 한 건만 만들어지고 나머지는 400입니다.
+ *       `Idempotency-Key` 헤더를 보내면, 응답을 받지 못해 같은 키로 다시 보낸 요청에
+ *       처음 성공 응답을 그대로 돌려줍니다(`Idempotent-Replayed: true`). 실패 응답은 저장하지 않으며 키는 24시간 유지됩니다.
  *     tags: [Order]
+ *     parameters:
+ *       - in: header
+ *         name: Idempotency-Key
+ *         required: false
+ *         schema:
+ *           type: string
+ *           pattern: '^[A-Za-z0-9_-]{8,128}$'
+ *         description: 요청마다 새로 만든 고유 값(예 UUID). 재시도할 때는 같은 값을 보낸다.
+ *         example: 7f3c2a1e-0b4d-4c8e-9a51-2d6f0e1b3c4a
  *     requestBody:
  *       required: true
  *       content:
@@ -250,7 +263,7 @@
  *                           example: 1
  *                           description: 생성된 구매 요청 id
  *       400:
- *         description: 유효성 검사 실패 (VALIDATION_ERROR), 유효하지 않은 장바구니 항목 포함 (BAD_REQUEST)
+ *         description: 유효성 검사 실패 (VALIDATION_ERROR), 유효하지 않은 장바구니 항목 포함 (BAD_REQUEST), 형식이 잘못된 Idempotency-Key (INVALID_IDEMPOTENCY_KEY)
  *         content:
  *           application/json:
  *             schema:
@@ -270,7 +283,13 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: 즉시구매에서 이번 달 남은 예산 부족 (BUDGET_EXCEEDED)
+ *         description: 즉시구매에서 이번 달 남은 예산 부족 (BUDGET_EXCEEDED), 같은 Idempotency-Key 요청이 처리 중 (IDEMPOTENCY_IN_PROGRESS)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       422:
+ *         description: 다른 내용의 요청에 이미 쓴 Idempotency-Key (IDEMPOTENCY_KEY_REUSED)
  *         content:
  *           application/json:
  *             schema:
