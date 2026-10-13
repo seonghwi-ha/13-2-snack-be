@@ -1,10 +1,9 @@
 ---
-name: "[BE] feat: 구현할 기능"
+name: '[BE] feat: 구현할 기능'
 about: 새 기능 개발 이슈 템플릿
-title: "[BE] feat/"
+title: '[BE] feat/'
 labels: BE, feat
 assignees: ''
-
 ---
 
 ## 💬 기능 설명

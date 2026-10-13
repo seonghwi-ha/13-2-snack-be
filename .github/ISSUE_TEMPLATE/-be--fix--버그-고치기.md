@@ -1,10 +1,9 @@
 ---
-name: "[BE] fix: 버그 고치기"
+name: '[BE] fix: 버그 고치기'
 about: 버그 수정 이슈 템플릿
-title: "[BE] fix/"
+title: '[BE] fix/'
 labels: BE, fix
 assignees: ''
-
 ---
 
 ## 🔎 버그 내용
