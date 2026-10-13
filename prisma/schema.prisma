@@ -66,6 +66,7 @@ model User {
   handledOrders    Order[]          @relation("Handler") // 내가 승인/반려 처리한 구매 (담당자)
   images           Image[] // 내가 업로드한 이미지
   productHistories ProductHistory[] // 내가 남긴 상품 변경 이력
+  idempotencyKeys  IdempotencyKey[] // 내가 보낸 멱등성 키
 
   @@index([organizationId])
 }
@@ -185,6 +186,24 @@ model ProductHistory {
 
   @@index([productId, id])
   @@index([organizationId, createdAt])
+}
+
+// 멱등성 키. 같은 키로 다시 온 요청에 처음 성공 응답을 그대로 돌려준다. (middlewares/idempotency.middleware.ts)
+// 키는 사용자별로 구분한다. 처리 중이면 응답 컬럼이 비어 있다.
+model IdempotencyKey {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  key            String
+  requestHash    String // 메서드 + 경로 + 본문의 SHA-256. 같은 키로 다른 요청을 보내면 거부한다.
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, key])
+  @@index([expiresAt])
 }
 
 model CartItem {

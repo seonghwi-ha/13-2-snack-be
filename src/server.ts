@@ -5,6 +5,7 @@ import {
   createMonthlyBudgetsOnStartup,
   startBudgetScheduler,
 } from './schedulers/budget.scheduler';
+import { startExpiredIdempotencyKeyCleanupScheduler } from './schedulers/idempotency.scheduler';
 import { startOrphanImageCleanupScheduler } from './schedulers/image.scheduler';
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -19,6 +20,9 @@ async function startServer() {
 
     // 상품에 연결되지 않은 S3 이미지를 매일 정리
     startOrphanImageCleanupScheduler();
+
+    // 만료된 멱등성 키를 매일 정리
+    startExpiredIdempotencyKeyCleanupScheduler();
 
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
