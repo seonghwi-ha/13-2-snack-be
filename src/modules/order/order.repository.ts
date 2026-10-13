@@ -1,6 +1,85 @@
 import { prisma } from '../../config/prisma';
 import { OrderStatus, Prisma } from '../../generated/prisma/client';
+import { BadRequestError, ConflictError } from '../../types/errors';
 import { getKstDate } from '../../utils/date';
+
+/*
+@ 동시 요청 안전장치
+- 상태 확인과 변경 사이에 다른 요청이 끼어들 수 있으므로, 최종 판단은 트랜잭션 안의 조건부 갱신으로 한다.
+  · 주문 상태는 "PENDING일 때만" 바꾼다 → 중복 승인, 승인·취소 경합 방지
+  · 예산은 "차감 후에도 시작 예산 이하일 때만" 차감한다 → 동시 승인으로 예산 초과 방지
+  · 장바구니는 주문과 같은 트랜잭션에서 지우고, 다 지워졌을 때만 주문을 만든다 → 같은 장바구니로 중복 주문 방지
+- PostgreSQL은 같은 행을 동시에 UPDATE하면 뒤 요청이 앞 요청의 커밋을 기다린 뒤 조건을 다시 평가한다.
+  그래서 잠금을 따로 잡지 않아도 조건을 통과하는 요청은 한 건뿐이다.
+- 조건이 맞지 않으면 에러를 던져 트랜잭션 전체를 되돌린다. (서비스의 사전 검사는 빠른 실패와 메시지용)
+- 같은 조직의 승인·즉시 구매는 모두 예산 행을 거치므로, 예산을 먼저 차감해 순서를 맞추고
+  상품 구매 수는 그 뒤에 올린다. 상품 행 잠금 순서가 엇갈려 생기는 교착을 피하려는 것이다.
+*/
+
+type TransactionClient = Prisma.TransactionClient;
+
+function orderAlreadyProcessed(): ConflictError {
+  return new ConflictError(
+    '이미 처리된 구매 요청입니다.',
+    'ORDER_ALREADY_PROCESSED',
+  );
+}
+
+async function spendCurrentBudget(
+  tx: TransactionClient,
+  organizationId: number,
+  amount: number,
+): Promise<void> {
+  const { year, month } = getCurrentBudgetPeriod();
+
+  const updatedCount = await tx.$executeRaw`
+    UPDATE "Budget"
+    SET "spentAmount" = "spentAmount" + ${amount}, "updatedAt" = NOW()
+    WHERE "organizationId" = ${organizationId}
+      AND "year" = ${year}
+      AND "month" = ${month}
+      AND "spentAmount" + ${amount} <= "startingBudget"
+  `;
+
+  if (updatedCount === 0) {
+    throw new ConflictError(
+      '이번 달 남은 예산을 초과했습니다.',
+      'BUDGET_EXCEEDED',
+    );
+  }
+}
+
+async function increasePurchaseCounts(
+  tx: TransactionClient,
+  items: { productId: number; quantity: number }[],
+): Promise<void> {
+  // 여러 요청이 같은 상품들을 올릴 때 항상 같은 순서로 잠그도록 정렬한다.
+  const sortedItems = [...items].sort((a, b) => a.productId - b.productId);
+
+  for (const item of sortedItems) {
+    await tx.product.update({
+      where: { id: item.productId },
+      data: { purchaseCount: { increment: item.quantity } },
+    });
+  }
+}
+
+// 다른 요청이 먼저 지웠다면 일부만 지워진다. 그 경우 주문을 만들지 않고 되돌린다.
+async function deleteOwnCartItems(
+  tx: TransactionClient,
+  cartItemIds: number[],
+  userId: number,
+): Promise<void> {
+  const { count } = await tx.cartItem.deleteMany({
+    where: { id: { in: cartItemIds }, userId },
+  });
+
+  if (count !== cartItemIds.length) {
+    throw new BadRequestError(
+      '유효하지 않은 장바구니 항목이 포함되어 있습니다.',
+    );
+  }
+}
 
 // ------------------------------
 // select/include 상수 + 타입 추론
@@ -69,19 +148,24 @@ export function createOrder(data: {
   deliveryFee: number;
   totalPrice: number;
   items: OrderItemInput[];
+  cartItemIds: number[];
 }) {
-  return prisma.order.create({
-    data: {
-      status: OrderStatus.PENDING,
-      organizationId: data.organizationId,
-      requesterId: data.requesterId,
-      requestMessage: data.requestMessage,
-      deliveryFee: data.deliveryFee,
-      totalPrice: data.totalPrice,
-      items: {
-        create: data.items,
+  return prisma.$transaction(async (tx) => {
+    await deleteOwnCartItems(tx, data.cartItemIds, data.requesterId);
+
+    return tx.order.create({
+      data: {
+        status: OrderStatus.PENDING,
+        organizationId: data.organizationId,
+        requesterId: data.requesterId,
+        requestMessage: data.requestMessage,
+        deliveryFee: data.deliveryFee,
+        totalPrice: data.totalPrice,
+        items: {
+          create: data.items,
+        },
       },
-    },
+    });
   });
 }
 
@@ -93,8 +177,12 @@ export function createApprovedOrder(data: {
   deliveryFee: number;
   totalPrice: number;
   items: OrderItemInput[];
+  cartItemIds: number[];
 }) {
   return prisma.$transaction(async (tx) => {
+    await deleteOwnCartItems(tx, data.cartItemIds, data.requesterId);
+    await spendCurrentBudget(tx, data.organizationId, data.totalPrice);
+
     const order = await tx.order.create({
       data: {
         status: OrderStatus.APPROVED,
@@ -111,32 +199,9 @@ export function createApprovedOrder(data: {
       include: { items: true },
     });
 
-    for (const item of order.items) {
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { purchaseCount: { increment: item.quantity } },
-      });
-    }
-
-    const { year, month } = getCurrentBudgetPeriod();
-    await tx.budget.update({
-      where: {
-        organizationId_year_month: {
-          organizationId: data.organizationId,
-          year,
-          month,
-        },
-      },
-      data: { spentAmount: { increment: data.totalPrice } },
-    });
+    await increasePurchaseCounts(tx, order.items);
 
     return order;
-  });
-}
-
-export function deleteCartItems(ids: number[]) {
-  return prisma.cartItem.deleteMany({
-    where: { id: { in: ids } },
   });
 }
 
@@ -194,11 +259,15 @@ export function findMyOrderById(id: number, userId: number) {
   });
 }
 
-export function cancelOrder(id: number, userId: number) {
-  return prisma.order.update({
-    where: { id, requesterId: userId },
+export async function cancelOrder(id: number, userId: number): Promise<void> {
+  const { count } = await prisma.order.updateMany({
+    where: { id, requesterId: userId, status: OrderStatus.PENDING },
     data: { status: OrderStatus.CANCELED },
   });
+
+  if (count === 0) {
+    throw orderAlreadyProcessed();
+  }
 }
 
 // ------------------------------
@@ -265,50 +334,46 @@ export function approveOrder(
   data: { handlerId: number; responseMessage: string },
 ) {
   return prisma.$transaction(async (tx) => {
-    const order = await tx.order.update({
-      where: { id, organizationId: orgId },
+    const { count } = await tx.order.updateMany({
+      where: { id, organizationId: orgId, status: OrderStatus.PENDING },
       data: {
         status: OrderStatus.APPROVED,
         handlerId: data.handlerId,
         responseMessage: data.responseMessage,
       },
+    });
+
+    if (count === 0) {
+      throw orderAlreadyProcessed();
+    }
+
+    const order = await tx.order.findUniqueOrThrow({
+      where: { id },
       include: { items: true },
     });
 
-    for (const item of order.items) {
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { purchaseCount: { increment: item.quantity } },
-      });
-    }
-
-    const { year, month } = getCurrentBudgetPeriod();
-    await tx.budget.update({
-      where: {
-        organizationId_year_month: {
-          organizationId: orgId,
-          year,
-          month,
-        },
-      },
-      data: { spentAmount: { increment: order.totalPrice } },
-    });
+    await spendCurrentBudget(tx, orgId, order.totalPrice);
+    await increasePurchaseCounts(tx, order.items);
 
     return order;
   });
 }
 
-export function rejectOrder(
+export async function rejectOrder(
   id: number,
   orgId: number,
   data: { handlerId: number; responseMessage: string },
-) {
-  return prisma.order.update({
-    where: { id, organizationId: orgId },
+): Promise<void> {
+  const { count } = await prisma.order.updateMany({
+    where: { id, organizationId: orgId, status: OrderStatus.PENDING },
     data: {
       status: OrderStatus.REJECTED,
       handlerId: data.handlerId,
       responseMessage: data.responseMessage,
     },
   });
+
+  if (count === 0) {
+    throw orderAlreadyProcessed();
+  }
 }
