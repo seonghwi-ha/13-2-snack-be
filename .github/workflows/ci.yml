@@ -1,0 +1,71 @@
+name: CI
+
+# dev로 가는 PR과 dev 푸시에서 코드 검사·테스트·빌드를 자동으로 돌린다.
+# 배포는 deploy.yml이 따로 맡는다.
+on:
+  pull_request:
+    branches:
+      - dev
+  push:
+    branches:
+      - dev
+
+# 같은 PR에 새 커밋이 오면 이전 실행은 취소한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 포맷 · 타입 · 테스트 · 빌드
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # 동시성 테스트(src/modules/order/order.concurrency.test.ts)가 쓰는 실제 PostgreSQL
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: snack
+          POSTGRES_PASSWORD: snack
+          POSTGRES_DB: snack_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U snack -d snack_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # npm ci 끝의 prisma generate와 migrate가 이 값을 읽는다. 테스트용 컨테이너 DB라 비밀값이 아니다.
+      DATABASE_URL: postgresql://snack:snack@localhost:5432/snack_test
+      TEST_DATABASE_URL: postgresql://snack:snack@localhost:5432/snack_test
+
+    steps:
+      - name: 저장소 불러오기
+        uses: actions/checkout@v4
+
+      - name: Node 버전 고정 (배포와 동일)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 포맷 검사
+        run: npx prettier --check .
+
+      - name: 타입 검사
+        run: npm run type-check
+
+      - name: 테스트 DB 마이그레이션
+        run: npx prisma migrate deploy
+
+      - name: 테스트 (단위 + 실제 DB 동시성)
+        run: npm test -- --ci
+
+      - name: 빌드
+        run: npm run build

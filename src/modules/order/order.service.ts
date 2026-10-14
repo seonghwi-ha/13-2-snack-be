@@ -70,6 +70,8 @@ export async function createOrder(
   let order;
 
   if (isInstantBuy) {
+    // 예산 검사는 빠른 실패와 안내 메시지용이다.
+    // 동시 요청에 대한 최종 판단은 repository의 조건부 차감이 트랜잭션 안에서 한다.
     const budget = await orderRepository.findCurrentBudget(orgId);
     if (!budget) {
       throw new NotFoundError(
@@ -93,6 +95,7 @@ export async function createOrder(
       deliveryFee: DELIVERY_FEE,
       totalPrice,
       items: orderItems,
+      cartItemIds,
     });
     // 즉시 구매로 상품 구매 수(인기순)가 바뀐다.
     await invalidateProductListCache(orgId);
@@ -104,10 +107,9 @@ export async function createOrder(
       deliveryFee: DELIVERY_FEE,
       totalPrice,
       items: orderItems,
+      cartItemIds,
     });
   }
-
-  await orderRepository.deleteCartItems(cartItemIds);
 
   return { id: order.id };
 }
@@ -257,6 +259,8 @@ export async function approveOrder(
   handlerId: number,
   data: { responseMessage: string },
 ) {
+  // 아래 상태·예산 검사는 빠른 실패와 안내 메시지용이다.
+  // 동시 승인에 대한 최종 판단은 repository의 조건부 갱신이 트랜잭션 안에서 한다.
   const order = await orderRepository.findOrderStatus(id, {
     organizationId: orgId,
   });
@@ -319,10 +323,10 @@ export async function rejectOrder(
     );
   }
 
-  const updated = await orderRepository.rejectOrder(id, orgId, {
+  await orderRepository.rejectOrder(id, orgId, {
     handlerId,
     responseMessage: data.responseMessage,
   });
 
-  return { id: updated.id, status: updated.status };
+  return { id, status: OrderStatus.REJECTED };
 }

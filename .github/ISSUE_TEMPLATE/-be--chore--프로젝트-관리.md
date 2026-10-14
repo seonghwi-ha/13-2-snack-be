@@ -1,10 +1,9 @@
 ---
-name: "[BE] chore: 프로젝트 관리"
+name: '[BE] chore: 프로젝트 관리'
 about: 설정, 패키지, 빌드 및 기타 관리 작업 이슈 템플릿
-title: "[BE] chore/"
+title: '[BE] chore/'
 labels: BE, chore
 assignees: ''
-
 ---
 
 ## 📌 배경
